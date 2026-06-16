@@ -11,11 +11,10 @@ st.write("AI-assisted Crime Prevention Through Environmental Design")
 def load_data():
     assault = pd.read_csv("toronto_crime.csv")
     assault["CRIME_TYPE"] = "Assault"
-    breakenter = pd.read_csv("/Users/AlexBabb/Desktop/breakenter.csv")
-    breakenter["CRIME_TYPE"] = "Break & Enter"
-    robbery = pd.read_csv("/Users/AlexBabb/Desktop/robbery.csv")
+breakenter = pd.read_csv("breakenter.csv")    breakenter["CRIME_TYPE"] = "Break & Enter"
+    robbery = pd.read_csv("robbery.csv")    
     robbery["CRIME_TYPE"] = "Robbery"
-    autotheft = pd.read_csv("/Users/AlexBabb/Desktop/autotheft.csv")
+    autotheft = pd.read_csv("autotheft.csv")
     autotheft["CRIME_TYPE"] = "Auto Theft"
     all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)
     all_crimes = all_crimes[
@@ -26,7 +25,7 @@ def load_data():
 
 @st.cache_data
 def load_poles():
-    poles = pd.read_csv("/Users/AlexBabb/Desktop/poles.csv")
+    poles = pd.read_csv("poles.csv")
     poles["LONG"] = poles["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][0])
     poles["LAT"] = poles["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][1])
     return poles
