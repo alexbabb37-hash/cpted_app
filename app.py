@@ -11,7 +11,8 @@ st.write("AI-assisted Crime Prevention Through Environmental Design")
 def load_data():
     assault = pd.read_csv("toronto_crime.csv")
     assault["CRIME_TYPE"] = "Assault"
-breakenter = pd.read_csv("breakenter.csv")    breakenter["CRIME_TYPE"] = "Break & Enter"
+breakenter = pd.read_csv("breakenter.csv")
+breakenter["CRIME_TYPE"] = "Break & Enter"
     robbery = pd.read_csv("robbery.csv")    
     robbery["CRIME_TYPE"] = "Robbery"
     autotheft = pd.read_csv("autotheft.csv")
