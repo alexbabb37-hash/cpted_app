@@ -22,7 +22,7 @@ def load_data():
     autotheft = pd.read_csv("autotheft.csv")
     autotheft["CRIME_TYPE"] = "Auto Theft"
 
-    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)=True)
+    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)
     all_crimes = all_crimes[
         (all_crimes["LAT_WGS84"] > 43) & (all_crimes["LAT_WGS84"] < 44) &
         (all_crimes["LONG_WGS84"] > -80) & (all_crimes["LONG_WGS84"] < -79)
