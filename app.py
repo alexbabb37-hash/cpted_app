@@ -9,7 +9,7 @@ st.write("AI-assisted Crime Prevention Through Environmental Design")
 
 @st.cache_data
 def load_data():
-    assault = pd.read_csv("/Users/AlexBabb/Desktop/toronto_crime.csv")
+    assault = pd.read_csv("toronto_crime.csv")
     assault["CRIME_TYPE"] = "Assault"
     breakenter = pd.read_csv("/Users/AlexBabb/Desktop/breakenter.csv")
     breakenter["CRIME_TYPE"] = "Break & Enter"
