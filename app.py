@@ -36,12 +36,28 @@ def load_poles():
     poles["LAT"] = poles["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][1])
     return poles
 
+@st.cache_data
+def load_stations():
+    stations = pd.read_csv("ttc_stations.csv")
+    return stations
+
+@st.cache_data
+def load_parks():
+    parks = pd.read_csv("parks.csv")
+    parks["LONG"] = parks["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][0])
+    parks["LAT"] = parks["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][1])
+    return parks
+
 df = load_data()
+stations = load_stations()
+parks = load_parks()
 
 st.sidebar.header("Filters")
 selected_crime = st.sidebar.selectbox("Crime Type", ["Assault", "Break & Enter", "Robbery", "Auto Theft"])
 time_filter = st.sidebar.slider("Hour of Day", 0, 23, (0, 23))
 show_poles = st.sidebar.checkbox("Show Street Pole Infrastructure")
+show_stations = st.sidebar.checkbox("Show TTC Subway Stations")
+show_parks = st.sidebar.checkbox("Show Parks")
 
 filtered = df[df["CRIME_TYPE"] == selected_crime]
 filtered = filtered[
@@ -60,8 +76,16 @@ if show_poles:
     poles = load_poles()
     ax.scatter(poles["LONG"], poles["LAT"],
                alpha=0.1, s=1, color="deepskyblue", label="Street Poles")
-    ax.legend(markerscale=8)
+if show_stations:
+    ax.scatter(stations["longitude"], stations["latitude"],
+               alpha=0.8, s=30, color="navy", marker="o",
+               label="TTC Subway Stations", zorder=5)
+if show_parks:
+    ax.scatter(parks["LONG"], parks["LAT"],
+               alpha=0.4, s=6, color="green", marker="o",
+               label="Parks", zorder=4)
 
+ax.legend(markerscale=8)
 ax.set_title(f"{selected_crime} - Hours {time_filter[0]}:00 to {time_filter[1]}:00")
 ax.set_xlabel("Longitude")
 ax.set_ylabel("Latitude")
