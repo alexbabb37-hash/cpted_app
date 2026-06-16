@@ -9,15 +9,21 @@ st.write("AI-assisted Crime Prevention Through Environmental Design")
 
 @st.cache_data
 def load_data():
+    @st.cache_data
+def load_data():
     assault = pd.read_csv("toronto_crime.csv")
     assault["CRIME_TYPE"] = "Assault"
-breakenter = pd.read_csv("breakenter.csv")
-breakenter["CRIME_TYPE"] = "Break & Enter"
-    robbery = pd.read_csv("robbery.csv")    
+
+    breakenter = pd.read_csv("breakenter.csv")
+    breakenter["CRIME_TYPE"] = "Break & Enter"
+
+    robbery = pd.read_csv("robbery.csv")
     robbery["CRIME_TYPE"] = "Robbery"
+
     autotheft = pd.read_csv("autotheft.csv")
     autotheft["CRIME_TYPE"] = "Auto Theft"
-    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)
+
+    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)=True)
     all_crimes = all_crimes[
         (all_crimes["LAT_WGS84"] > 43) & (all_crimes["LAT_WGS84"] < 44) &
         (all_crimes["LONG_WGS84"] > -80) & (all_crimes["LONG_WGS84"] < -79)
