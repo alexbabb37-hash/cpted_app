@@ -100,6 +100,29 @@ ax2.set_xlabel("Number of Incidents")
 plt.tight_layout()
 st.pyplot(fig2)
 
+st.header(f"Top TTC Stations for {selected_crime}")
+station_results = []
+for _, station in stations.iterrows():
+    nearby = (
+        ((filtered["LAT_WGS84"] - station["latitude"])**2 +
+         (filtered["LONG_WGS84"] - station["longitude"])**2)**0.5)
+    count = (nearby < 0.0025).sum()
+    station_results.append({
+    "Station": station["STATION"],
+    "Incidents Nearby": count,
+    "Daily Passengers": station["AVG_PASSEN"]
+})
+
+station_ranking = pd.DataFrame(station_results)
+
+station_ranking["Risk Score"] = (
+    station_ranking["Incidents Nearby"] / station_ranking["Daily Passengers"]
+) * 10000
+
+station_ranking = station_ranking.sort_values("Risk Score", ascending=False).head(10)
+
+st.dataframe(station_ranking, use_container_width=True)
+
 st.header("CPTED Analysis")
 cpted_insights = {
     "Assault": """
