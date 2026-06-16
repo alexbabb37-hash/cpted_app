@@ -7,8 +7,7 @@ import json
 st.title("Toronto CPTED Crime Analysis")
 st.write("AI-assisted Crime Prevention Through Environmental Design")
 
-@st.cache_data
-def load_data():
+
     @st.cache_data
 def load_data():
     assault = pd.read_csv("toronto_crime.csv")
