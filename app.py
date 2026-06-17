@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
+import numpy as np
 
 st.title("Toronto CPTED Crime Analysis")
 st.write("AI-assisted Crime Prevention Through Environmental Design")
@@ -69,8 +70,14 @@ st.write(f"**{len(filtered):,} incidents** match your filters")
 
 st.header("Crime Map")
 fig, ax = plt.subplots(figsize=(10, 7))
-ax.scatter(filtered["LONG_WGS84"], filtered["LAT_WGS84"],
-           alpha=0.1, s=1, color="red", label=selected_crime)
+
+ax.scatter(
+    filtered["LONG_WGS84"],
+    filtered["LAT_WGS84"],
+    alpha=0.03,
+    s=0.5,
+    color="red"
+)
 
 if show_poles:
     poles = load_poles()
@@ -91,15 +98,37 @@ ax.set_xlabel("Longitude")
 ax.set_ylabel("Latitude")
 st.pyplot(fig)
 
-st.header("Top 10 High Risk Neighbourhoods")
+st.header("Top 10 Neighbourhoods by Incident Count")
+
 top_hoods = filtered["NEIGHBOURHOOD_158"].value_counts().head(10)
+
 fig2, ax2 = plt.subplots(figsize=(10, 5))
-top_hoods.plot(kind="barh", ax=ax2, color="crimson")
+top_hoods.sort_values().plot(kind="barh", ax=ax2, color="crimson")
 ax2.set_title(f"Top Neighbourhoods for {selected_crime}")
 ax2.set_xlabel("Number of Incidents")
 plt.tight_layout()
 st.pyplot(fig2)
 
+st.header("Neighbourhood CPTED Risk Rankings")
+
+hood_risk = filtered["NEIGHBOURHOOD_158"].value_counts().reset_index()
+hood_risk.columns = ["Neighbourhood", "Incidents"]
+
+max_incidents = hood_risk["Incidents"].max()
+
+hood_risk["Risk Score"] = (
+    hood_risk["Incidents"] / max_incidents * 100
+).round(1)
+
+hood_risk = hood_risk.sort_values(
+    "Risk Score",
+    ascending=False
+)
+
+st.dataframe(
+    hood_risk.head(10).reset_index(drop=True),
+    use_container_width=True
+)
 st.header(f"Top TTC Stations for {selected_crime}")
 station_results = []
 for _, station in stations.iterrows():
