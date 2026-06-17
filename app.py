@@ -129,6 +129,56 @@ st.dataframe(
     hood_risk.head(10).reset_index(drop=True),
     use_container_width=True
 )
+st.header("Neighbourhood Assessment")
+selected_hood = st.selectbox(
+    "Select a Neighbourhood",
+    sorted(hood_risk["Neighbourhood"].unique())
+)
+hood_info = hood_risk[
+    hood_risk["Neighbourhood"] == selected_hood
+]
+
+hood_row = hood_info.iloc[0]
+st.metric(
+    "Neighbourhood Risk Score",
+    round(hood_row["Risk Score"], 1)
+)
+
+st.write(f"**Incidents:** {int(hood_row['Incidents'])}")
+
+st.subheader("Key Risk Drivers")
+if hood_row["Risk Score"] >= 60:
+    st.write("- High concentration of reported incidents compared to other neighbourhoods")
+    st.write("- Priority area for CPTED review and targeted intervention")
+    st.write("- May require stronger lighting, visibility, and access control strategies")
+
+elif hood_row["Risk Score"] >= 20:
+    st.write("- Moderate incident concentration")
+    st.write("- Area may benefit from targeted CPTED improvements")
+    st.write("- Focus should be on visibility, maintenance, and natural surveillance")
+
+else:
+    st.write("- Lower incident concentration compared to other neighbourhoods")
+    st.write("- Focus should be on maintaining existing safety conditions")
+    st.write("- Continue monitoring for changes over time")
+
+st.subheader("Assessment Summary")
+
+if hood_row["Risk Score"] >= 60:
+    st.write(
+        "This neighbourhood has a high concentration of reported incidents and should be prioritized for CPTED review and targeted interventions."
+    )
+
+elif hood_row["Risk Score"] >= 20:
+    st.write(
+        "This neighbourhood demonstrates a moderate level of reported incidents and may benefit from focused CPTED improvements and ongoing monitoring."
+    )
+
+else:
+    st.write(
+        "This neighbourhood has a relatively low concentration of reported incidents compared to other Toronto neighbourhoods."
+    )
+
 st.header(f"Top TTC Stations for {selected_crime}")
 station_results = []
 for _, station in stations.iterrows():
