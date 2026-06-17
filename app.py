@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import json
 import numpy as np
+from geopy.geocoders import Nominatim
 
 st.title("Toronto CPTED Crime Analysis")
 st.write("AI-assisted Crime Prevention Through Environmental Design")
@@ -178,7 +179,79 @@ else:
     st.write(
         "This neighbourhood has a relatively low concentration of reported incidents compared to other Toronto neighbourhoods."
     )
+    st.header("Address / Location Lookup")
 
+    address = st.text_input(
+        "Enter an address",
+        "100 Queen St W, Toronto"
+    )
+
+    geolocator = Nominatim(user_agent="cpted_app")
+
+try:
+    location = geolocator.geocode(address)
+
+    if location:
+        input_lat = location.latitude
+        input_lon = location.longitude
+
+        st.write(f"Latitude: {round(input_lat, 6)}")
+        st.write(f"Longitude: {round(input_lon, 6)}")
+    else:
+        st.error("Address not found")
+
+except:
+    st.error("Unable to geocode address")
+
+nearest_station = stations.copy()
+
+nearest_station["Distance"] = (
+    ((nearest_station["latitude"] - input_lat) ** 2 +
+     (nearest_station["longitude"] - input_lon) ** 2) ** 0.5
+)
+nearby_incidents = (
+    (((filtered["LAT_WGS84"] - input_lat) ** 2 +
+      (filtered["LONG_WGS84"] - input_lon) ** 2) ** 0.5
+     < 0.0025)
+).sum()
+
+nearest_station = nearest_station.sort_values("Distance").iloc[0]
+
+st.write(f"**Nearest TTC Station:** {nearest_station['STATION']}")
+st.write(f"**Nearby Incidents:** {nearby_incidents}")
+distance_m = nearest_station["Distance"] * 111000
+
+st.write(f"**Approx. Distance to Station:** {round(distance_m)} metres")
+st.write(f"**Line:** {nearest_station['LINE']}")
+st.write(f"**Average Daily Passengers:** {int(nearest_station['AVG_PASSEN'])}")
+if nearby_incidents >= 800:
+    st.error("High crime activity area")
+    st.write("This location is associated with a high concentration of reported incidents.")
+
+elif nearby_incidents >= 300:
+    st.warning("Moderate crime activity area")
+    st.write("This location is associated with a moderate concentration of reported incidents.")
+
+else:
+    st.success("Lower crime activity area")
+    st.write("This location is associated with a lower concentration of reported incidents.")
+
+st.subheader("Location Assessment")
+
+if nearby_incidents >= 800:
+    st.write(
+        "This location is situated within a high incident concentration area. CPTED priorities should focus on natural surveillance, lighting, visibility, access control, and territorial reinforcement."
+    )
+
+elif nearby_incidents >= 300:
+    st.write(
+        "This location experiences a moderate level of reported incidents. CPTED strategies should focus on visibility, maintenance, and supporting positive activity generators."
+    )
+
+else:
+    st.write(
+        "This location experiences a relatively low concentration of reported incidents. CPTED efforts should focus on maintaining existing safety conditions and monitoring future trends."
+    )
 st.header(f"Top TTC Stations for {selected_crime}")
 station_results = []
 for _, station in stations.iterrows():

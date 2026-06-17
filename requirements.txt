@@ -6,3 +6,4 @@ geopandas
 shapely
 pyproj
 openpyxl
+geopy
