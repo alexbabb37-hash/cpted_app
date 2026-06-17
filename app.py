@@ -149,8 +149,36 @@ station_ranking["Risk Score"] = (
 ) * 10000
 
 station_ranking = station_ranking.sort_values("Risk Score", ascending=False).head(10)
-
 st.dataframe(station_ranking, use_container_width=True)
+
+st.header("TTC Station Lookup")
+
+selected_station = st.selectbox(
+    "Select a TTC Station",
+    sorted(station_ranking["Station"].unique())
+)
+
+station_info = station_ranking[
+    station_ranking["Station"] == selected_station
+]
+
+station_row = station_info.iloc[0]
+
+st.metric(
+    "Risk Score",
+    round(station_row["Risk Score"], 1)
+)
+
+st.write(f"**Incidents Nearby:** {int(station_row['Incidents Nearby'])}")
+st.write(f"**Daily Passengers:** {int(station_row['Daily Passengers'])}")
+
+if station_row["Risk Score"] > 400:
+    st.error("High CPTED Risk Area")
+elif station_row["Risk Score"] > 200:
+    st.warning("Moderate CPTED Risk Area")
+else:
+    st.success("Lower CPTED Risk Area")
+
 
 st.header("CPTED Analysis")
 cpted_insights = {
