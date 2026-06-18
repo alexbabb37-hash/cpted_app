@@ -7,3 +7,5 @@ shapely
 pyproj
 openpyxl
 geopy
+folium
+streamlit-folium

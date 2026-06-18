@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import json
 import numpy as np
 from geopy.geocoders import Nominatim
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import HeatMap
 
 st.title("Toronto CPTED Crime Analysis")
 st.write("AI-assisted Crime Prevention Through Environmental Design")
@@ -54,12 +57,18 @@ df = load_data()
 stations = load_stations()
 parks = load_parks()
 
-st.sidebar.header("Filters")
+st.sidebar.header("🔍 Filters")
+st.sidebar.markdown("---")
 selected_crime = st.sidebar.selectbox("Crime Type", ["Assault", "Break & Enter", "Robbery", "Auto Theft"])
 time_filter = st.sidebar.slider("Hour of Day", 0, 23, (0, 23))
-show_poles = st.sidebar.checkbox("Show Street Pole Infrastructure")
-show_stations = st.sidebar.checkbox("Show TTC Subway Stations")
-show_parks = st.sidebar.checkbox("Show Parks")
+st.sidebar.markdown("---")
+st.sidebar.header("🗺️ Map Layers")
+show_poles = st.sidebar.checkbox("Street Pole Infrastructure")
+show_stations = st.sidebar.checkbox("TTC Subway Stations")
+show_parks = st.sidebar.checkbox("Parks")
+st.sidebar.markdown("---")
+st.sidebar.caption("Toronto CPTED Analysis Tool")
+st.sidebar.caption("Built by Alex Babb — University of Guelph")
 
 filtered = df[df["CRIME_TYPE"] == selected_crime]
 filtered = filtered[
@@ -179,14 +188,16 @@ else:
     st.write(
         "This neighbourhood has a relatively low concentration of reported incidents compared to other Toronto neighbourhoods."
     )
-    st.header("Address / Location Lookup")
 
-    address = st.text_input(
-        "Enter an address",
-        "100 Queen St W, Toronto"
-    )
 
-    geolocator = Nominatim(user_agent="cpted_app")
+st.header("Address / Location Lookup")
+
+address = st.text_input(
+    "Enter an address",
+    "100 Queen St W, Toronto"
+)
+
+geolocator = Nominatim(user_agent="cpted_app")
 
 try:
     location = geolocator.geocode(address)
@@ -199,9 +210,13 @@ try:
         st.write(f"Longitude: {round(input_lon, 6)}")
     else:
         st.error("Address not found")
+        input_lat = 43.6532
+        input_lon = -79.3832
 
-except:
-    st.error("Unable to geocode address")
+except Exception as e:
+    st.error(f"Error: {e}")
+    input_lat = 43.6532
+    input_lon = -79.3832
 
 nearest_station = stations.copy()
 
@@ -209,21 +224,19 @@ nearest_station["Distance"] = (
     ((nearest_station["latitude"] - input_lat) ** 2 +
      (nearest_station["longitude"] - input_lon) ** 2) ** 0.5
 )
+
 nearby_incidents = (
     (((filtered["LAT_WGS84"] - input_lat) ** 2 +
       (filtered["LONG_WGS84"] - input_lon) ** 2) ** 0.5
      < 0.0025)
 ).sum()
 
-nearest_station = nearest_station.sort_values("Distance").iloc[0]
+nearest = nearest_station.sort_values("Distance").iloc[0]
 
-st.write(f"**Nearest TTC Station:** {nearest_station['STATION']}")
-st.write(f"**Nearby Incidents:** {nearby_incidents}")
-distance_m = nearest_station["Distance"] * 111000
-
-st.write(f"**Approx. Distance to Station:** {round(distance_m)} metres")
-st.write(f"**Line:** {nearest_station['LINE']}")
-st.write(f"**Average Daily Passengers:** {int(nearest_station['AVG_PASSEN'])}")
+col1, col2, col3 = st.columns(3)
+col1.metric("Nearby Incidents", nearby_incidents)
+col2.metric("Nearest Station", nearest["STATION"])
+col3.metric("Distance to Station", f"{round(nearest['Distance'] * 111000)}m")
 if nearby_incidents >= 800:
     st.error("High crime activity area")
     st.write("This location is associated with a high concentration of reported incidents.")
@@ -236,7 +249,82 @@ else:
     st.success("Lower crime activity area")
     st.write("This location is associated with a lower concentration of reported incidents.")
 
+st.subheader("Interactive Location Map")
+
+m = folium.Map(
+    location=[input_lat, input_lon],
+    zoom_start=15
+)
+
+folium.Marker(
+    [input_lat, input_lon],
+    popup="Selected Location",
+    tooltip="Selected Location",
+    icon=folium.Icon(color="blue", icon="star")
+).add_to(m)
+folium.Circle(
+    location=[input_lat, input_lon],
+    radius=300,
+    color="blue",
+    fill=False
+).add_to(m)
+
+nearby_points = filtered[
+    (((filtered["LAT_WGS84"] - input_lat) ** 2 +
+      (filtered["LONG_WGS84"] - input_lon) ** 2) ** 0.5) < 0.0025
+]
+
+heat_data = nearby_points[["LAT_WGS84", "LONG_WGS84"]].dropna().values.tolist()
+
+HeatMap(
+    heat_data,
+    radius=12,
+    blur=18,
+    max_zoom=15
+).add_to(m)
+
+st_folium(m, width=700, height=500)
+st.subheader("Location Map")
+fig3, ax3 = plt.subplots(figsize=(8, 6))
+local = filtered[
+    (abs(filtered["LAT_WGS84"] - input_lat) < 0.02) &
+    (abs(filtered["LONG_WGS84"] - input_lon) < 0.02)
+]
+ax3.scatter(local["LONG_WGS84"], local["LAT_WGS84"],
+            alpha=0.3, s=5, color="red", label="Incidents")
+ax3.scatter(input_lon, input_lat,
+            s=200, color="blue", marker="*", label="Your Location", zorder=5)
+ax3.set_title(f"Crime Activity Near {address}")
+ax3.legend()
+st.pyplot(fig3)
 st.subheader("Location Assessment")
+st.subheader("CPTED Factor Analysis")
+risk_factors = []
+protective_factors = []
+
+if nearby_incidents >= 800:
+    risk_factors.append("High concentration of reported incidents")
+elif nearby_incidents >= 300:
+    risk_factors.append("Moderate concentration of reported incidents")
+else:
+    protective_factors.append("Lower concentration of reported incidents")
+
+station_passengers = nearest["AVG_PASSEN"]
+
+if station_passengers >= 50000:
+    risk_factors.append("Heavy transit activity")
+elif station_passengers >= 25000:
+    risk_factors.append("Moderate transit activity")
+else:
+    protective_factors.append("Lower transit activity")
+
+st.write("### Risk Factors")
+for factor in risk_factors:
+    st.write(f"🔴 {factor}")
+
+st.write("### Protective Factors")
+for factor in protective_factors:
+    st.write(f"🟢 {factor}")
 
 if nearby_incidents >= 800:
     st.write(
@@ -302,7 +390,76 @@ elif station_row["Risk Score"] > 200:
 else:
     st.success("Lower CPTED Risk Area")
 
+st.header("Multi-Factor CPTED Score")
 
+hood_stats = filtered.groupby("NEIGHBOURHOOD_158").agg(
+    Incidents=("CRIME_TYPE", "count"),
+    Night_Incidents=("OCC_HOUR", lambda x: (x >= 20).sum()),
+    Outside_Incidents=("PREMISES_TYPE", lambda x: (x == "Outside").sum())
+).reset_index()
+
+hood_stats["Night_Ratio"] = (hood_stats["Night_Incidents"] / hood_stats["Incidents"]).round(2)
+hood_stats["Outside_Ratio"] = (hood_stats["Outside_Incidents"] / hood_stats["Incidents"]).round(2)
+
+max_inc = hood_stats["Incidents"].max()
+hood_stats["CPTED_Score"] = (
+    (hood_stats["Incidents"] / max_inc * 60) +
+    (hood_stats["Night_Ratio"] * 20) +
+    (hood_stats["Outside_Ratio"] * 20)
+).round(1)
+
+hood_stats = hood_stats.sort_values("CPTED_Score", ascending=False)
+
+st.dataframe(
+    hood_stats[["NEIGHBOURHOOD_158", "Incidents", "Night_Ratio", "Outside_Ratio", "CPTED_Score"]]
+    .head(10)
+    .rename(columns={"NEIGHBOURHOOD_158": "Neighbourhood"})
+    .reset_index(drop=True),
+    use_container_width=True
+)
+st.header("Crime Trend Over Time")
+
+yearly = filtered.groupby("OCC_YEAR").size()
+yearly = yearly[(yearly.index >= 2014) & (yearly.index < 2026)]
+fig7, ax7 = plt.subplots(figsize=(10, 4))
+yearly.plot(kind="line", ax=ax7, color="crimson", marker="o")
+ax7.set_title(f"{selected_crime} Trend 2014-Present")
+ax7.set_xlabel("Year")
+ax7.set_ylabel("Incidents")
+plt.tight_layout()
+st.pyplot(fig7)
+
+if yearly.iloc[-1] > yearly.iloc[0]:
+    st.write("**Trend: Increasing** — CPTED interventions increasingly important")
+else:
+    st.write("**Trend: Decreasing** — existing interventions showing impact")
+st.header("Crime by Location Type")
+
+premises = filtered["PREMISES_TYPE"].value_counts()
+
+fig5, ax5 = plt.subplots(figsize=(10, 4))
+premises.sort_values().plot(kind="barh", ax=ax5, color="darkorange")
+ax5.set_title(f"{selected_crime} by Premises Type")
+ax5.set_xlabel("Number of Incidents")
+plt.tight_layout()
+st.pyplot(fig5)
+
+top_premises = premises.index[0]
+st.write(f"**Most common location:** {top_premises}")
+st.header("Time of Day Analysis")
+
+hourly = filtered.groupby("OCC_HOUR").size()
+
+fig4, ax4 = plt.subplots(figsize=(10, 4))
+hourly.plot(kind="bar", ax=ax4, color="crimson")
+ax4.set_title(f"{selected_crime} by Hour of Day")
+ax4.set_xlabel("Hour")
+ax4.set_ylabel("Incidents")
+plt.tight_layout()
+st.pyplot(fig4)
+
+peak_hour = hourly[hourly.index > 0].idxmax()
+st.write(f"**Peak hour for {selected_crime}:** {peak_hour}:00")
 st.header("CPTED Analysis")
 cpted_insights = {
     "Assault": """
