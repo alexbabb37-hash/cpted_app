@@ -53,9 +53,27 @@ def load_parks():
     parks["LAT"] = parks["geometry"].apply(lambda x: json.loads(x)["coordinates"][0][1])
     return parks
 
+@st.cache_data
+def load_population():
+    pop = pd.read_csv("population_clean.csv")
+    return pop
+
+import re
+def clean_neighbourhood(name):
+    name = re.sub(r'\s*\(\d+\)', '', str(name)).strip()
+    name = name.replace("St.James", "St. James")
+    name = name.replace("O'Connor-Parkview", "O`Connor Parkview")
+    name = name.replace("Danforth East York", "Danforth-East York")
+    name = name.replace("East End-Danforth", "East End Danforth")
+    name = name.replace("Taylor-Massey", "Taylor Massey")
+    name = name.replace("Yonge-St.Clair", "Yonge-St. Clair")
+    return name
 df = load_data()
 stations = load_stations()
 parks = load_parks()
+population = load_population()
+
+df["NEIGHBOURHOOD_CLEAN"] = df["NEIGHBOURHOOD_158"].apply(clean_neighbourhood)
 
 st.sidebar.header("🔍 Filters")
 st.sidebar.markdown("---")
@@ -392,7 +410,8 @@ else:
 
 st.header("Multi-Factor CPTED Score")
 
-hood_stats = filtered.groupby("NEIGHBOURHOOD_158").agg(
+filtered = filtered[filtered["NEIGHBOURHOOD_CLEAN"] != "NSA"]
+hood_stats = filtered.groupby("NEIGHBOURHOOD_CLEAN").agg(
     Incidents=("CRIME_TYPE", "count"),
     Night_Incidents=("OCC_HOUR", lambda x: (x >= 20).sum()),
     Outside_Incidents=("PREMISES_TYPE", lambda x: (x == "Outside").sum())
@@ -401,9 +420,16 @@ hood_stats = filtered.groupby("NEIGHBOURHOOD_158").agg(
 hood_stats["Night_Ratio"] = (hood_stats["Night_Incidents"] / hood_stats["Incidents"]).round(2)
 hood_stats["Outside_Ratio"] = (hood_stats["Outside_Incidents"] / hood_stats["Incidents"]).round(2)
 
-max_inc = hood_stats["Incidents"].max()
+hood_stats = hood_stats.merge(
+    population, left_on="NEIGHBOURHOOD_CLEAN", right_on="Neighbourhood", how="left"
+)
+
+hood_stats["Crime_Rate"] = (hood_stats["Incidents"] / hood_stats["Population"]) * 1000
+hood_stats["Crime_Rate"] = hood_stats["Crime_Rate"].fillna(hood_stats["Incidents"])
+
+max_rate = hood_stats["Crime_Rate"].max()
 hood_stats["CPTED_Score"] = (
-    (hood_stats["Incidents"] / max_inc * 60) +
+    (hood_stats["Crime_Rate"] / max_rate * 60) +
     (hood_stats["Night_Ratio"] * 20) +
     (hood_stats["Outside_Ratio"] * 20)
 ).round(1)
@@ -411,9 +437,9 @@ hood_stats["CPTED_Score"] = (
 hood_stats = hood_stats.sort_values("CPTED_Score", ascending=False)
 
 st.dataframe(
-    hood_stats[["NEIGHBOURHOOD_158", "Incidents", "Night_Ratio", "Outside_Ratio", "CPTED_Score"]]
+    hood_stats[["NEIGHBOURHOOD_CLEAN", "Incidents", "Population", "Crime_Rate", "Night_Ratio", "Outside_Ratio", "CPTED_Score"]]
     .head(10)
-    .rename(columns={"NEIGHBOURHOOD_158": "Neighbourhood"})
+    .rename(columns={"NEIGHBOURHOOD_CLEAN": "Neighbourhood"})
     .reset_index(drop=True),
     use_container_width=True
 )
