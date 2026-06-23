@@ -302,30 +302,18 @@ HeatMap(
 ).add_to(m)
 
 st_folium(m, width=700, height=500)
-st.subheader("Location Map")
-fig3, ax3 = plt.subplots(figsize=(8, 6))
-local = filtered[
-    (abs(filtered["LAT_WGS84"] - input_lat) < 0.02) &
-    (abs(filtered["LONG_WGS84"] - input_lon) < 0.02)
-]
-ax3.scatter(local["LONG_WGS84"], local["LAT_WGS84"],
-            alpha=0.3, s=5, color="red", label="Incidents")
-ax3.scatter(input_lon, input_lat,
-            s=200, color="blue", marker="*", label="Your Location", zorder=5)
-ax3.set_title(f"Crime Activity Near {address}")
-ax3.legend()
-st.pyplot(fig3)
+
 st.subheader("Location Assessment")
 st.subheader("CPTED Factor Analysis")
 risk_factors = []
 protective_factors = []
 
 if nearby_incidents >= 800:
-    risk_factors.append("High concentration of reported incidents")
+    risk_factors.append(f"High concentration of {selected_crime.lower()} incidents")
 elif nearby_incidents >= 300:
-    risk_factors.append("Moderate concentration of reported incidents")
+    risk_factors.append(f"Moderate concentration of {selected_crime.lower()} incidents")
 else:
-    protective_factors.append("Lower concentration of reported incidents")
+    protective_factors.append(f"Lower concentration of {selected_crime.lower()} incidents")
 
 station_passengers = nearest["AVG_PASSEN"]
 
@@ -344,20 +332,29 @@ st.write("### Protective Factors")
 for factor in protective_factors:
     st.write(f"🟢 {factor}")
 
-if nearby_incidents >= 800:
+st.subheader("Crime-Specific CPTED Assessment")
+
+if selected_crime == "Assault":
     st.write(
-        "This location is situated within a high incident concentration area. CPTED priorities should focus on natural surveillance, lighting, visibility, access control, and territorial reinforcement."
+        f"This location has {nearby_incidents} nearby assault incidents, indicating elevated opportunities for interpersonal crime. Existing conditions should prioritize natural surveillance, lighting, and maintaining clear sightlines. CPTED interventions can help by increasing visibility, supporting legitimate activity, and reinforcing territorial ownership."
     )
 
-elif nearby_incidents >= 300:
+elif selected_crime == "Break & Enter":
     st.write(
-        "This location experiences a moderate level of reported incidents. CPTED strategies should focus on visibility, maintenance, and supporting positive activity generators."
-    )
+    f"This location has {nearby_incidents} nearby break and enter incidents, suggesting increased opportunities for property crime. Existing conditions should prioritize access control, lighting, and reducing areas of concealment. CPTED interventions can help by strengthening boundaries, improving visibility, and reinforcing the distinction between public and private space."
+)
 
-else:
+elif selected_crime == "Robbery":
     st.write(
-        "This location experiences a relatively low concentration of reported incidents. CPTED efforts should focus on maintaining existing safety conditions and monitoring future trends."
-    )
+    f"This location has {nearby_incidents} nearby robbery incidents, indicating elevated opportunities for street-level crime. Existing conditions should prioritize visibility, pedestrian safety, and natural surveillance. CPTED interventions can help by improving lighting, maintaining clear sightlines, and supporting legitimate activity throughout the area."
+)
+
+elif selected_crime == "Auto Theft":
+    st.write(
+    f"This location has {nearby_incidents} nearby auto theft incidents, suggesting elevated opportunities for vehicle-related crime. Existing conditions should prioritize surveillance, parking visibility, and access control. CPTED interventions can help by improving lighting, increasing natural surveillance, and reducing opportunities for offender mobility."
+)
+
+
 st.header(f"Top TTC Stations for {selected_crime}")
 station_results = []
 for _, station in stations.iterrows():
@@ -486,7 +483,7 @@ st.pyplot(fig4)
 
 peak_hour = hourly[hourly.index > 0].idxmax()
 st.write(f"**Peak hour for {selected_crime}:** {peak_hour}:00")
-st.header("CPTED Analysis")
+st.header("General CPTED Guidance")
 cpted_insights = {
     "Assault": """
 **Primary CPTED Factors:**
