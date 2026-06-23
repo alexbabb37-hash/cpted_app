@@ -29,7 +29,13 @@ def load_data():
     autotheft = pd.read_csv("autotheft.csv")
     autotheft["CRIME_TYPE"] = "Auto Theft"
 
-    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)
+    theftover = pd.read_csv("theft_over.csv")
+    theftover["CRIME_TYPE"] = "Theft Over $5000"
+
+    all_crimes = pd.concat(
+        [assault, breakenter, robbery, autotheft, theftover],
+        ignore_index=True
+    )
 
     all_crimes = all_crimes[
         (all_crimes["LAT_WGS84"] > 43) & (all_crimes["LAT_WGS84"] < 44) &
@@ -70,6 +76,23 @@ def get_score_summary(score):
 
 def get_crime_guidance(crime_type, score):
     guidance = {
+                "Theft Over $5000": {
+            "driver": "high-value merchandise theft exposure, stockroom access, product visibility, and loss prevention gaps",
+            "areas": [
+                "High-value merchandise displays",
+                "Stockroom entrances",
+                "Customer exit routes",
+                "Checkout and bag-check areas",
+                "Camera coverage around theft-prone aisles"
+            ],
+            "strategies": [
+                "Use EAS tagging or locked display cases for high-value merchandise",
+                "Improve staff visibility over theft-prone areas",
+                "Strengthen stockroom access control",
+                "Improve CCTV coverage around exits and high-value product areas",
+                "Use clear sightlines and store layout to reduce concealment opportunities"
+            ]
+        },
         "Break & Enter": {
             "driver": "property access risk, after-hours vulnerability, and weak perimeter control",
             "areas": [
@@ -218,6 +241,7 @@ def generate_pdf(address, overall_score, score_dict, count_dict, executive_summa
 
     table_data = [
         ["Crime Type", "Nearby Incidents", "Score", "Risk Level"],
+        ["Theft Over $5000", str(count_dict["Theft Over $5000"]), f"{score_dict['Theft Over $5000']}/100", short_risk_label(score_dict["Theft Over $5000"])],
         ["Break & Enter", str(count_dict["Break & Enter"]), f"{score_dict['Break & Enter']}/100", short_risk_label(score_dict["Break & Enter"])],
         ["Robbery", str(count_dict["Robbery"]), f"{score_dict['Robbery']}/100", short_risk_label(score_dict["Robbery"])],
         ["Assault", str(count_dict["Assault"]), f"{score_dict['Assault']}/100", short_risk_label(score_dict["Assault"])],
@@ -291,6 +315,7 @@ if st.button("Generate Safety Score"):
                 return int(nearby.sum())
 
             count_dict = {
+                "Theft Over $5000": get_nearby("Theft Over $5000"),
                 "Break & Enter": get_nearby("Break & Enter"),
                 "Robbery": get_nearby("Robbery"),
                 "Assault": get_nearby("Assault"),
@@ -298,6 +323,7 @@ if st.button("Generate Safety Score"):
             }
 
             city_avg = {
+                "Theft Over $5000": len(df[df["CRIME_TYPE"] == "Theft Over $5000"]) / 140,
                 "Break & Enter": len(df[df["CRIME_TYPE"] == "Break & Enter"]) / 140,
                 "Robbery": len(df[df["CRIME_TYPE"] == "Robbery"]) / 140,
                 "Assault": len(df[df["CRIME_TYPE"] == "Assault"]) / 140,
@@ -310,6 +336,7 @@ if st.button("Generate Safety Score"):
                 return round(score, 1)
 
             score_dict = {
+                "Theft Over $5000": calc_score(count_dict["Theft Over $5000"], city_avg["Theft Over $5000"]),
                 "Break & Enter": calc_score(count_dict["Break & Enter"], city_avg["Break & Enter"]),
                 "Robbery": calc_score(count_dict["Robbery"], city_avg["Robbery"]),
                 "Assault": calc_score(count_dict["Assault"], city_avg["Assault"]),
@@ -317,12 +344,15 @@ if st.button("Generate Safety Score"):
             }
 
             overall_score = round(
+                (score_dict["Theft Over $5000"] * 0.30) +
                 (score_dict["Break & Enter"] * 0.35) +
                 (score_dict["Robbery"] * 0.30) +
                 (score_dict["Assault"] * 0.25) +
                 (score_dict["Auto Theft"] * 0.10),
                 1
             )
+
+            overall_score = min(overall_score, 100)
 
             executive_summary, key_drivers, areas_to_examine, recommendations = get_assessment(
                 address, score_dict, count_dict, overall_score
@@ -340,11 +370,12 @@ if st.button("Generate Safety Score"):
                 st.success(f"### {overall_score} / 100 — {risk_label(overall_score)}")
 
             st.header("Sub-Scores by Crime Type")
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Break & Enter", f"{score_dict['Break & Enter']}/100", f"{count_dict['Break & Enter']} nearby")
-            col2.metric("Robbery", f"{score_dict['Robbery']}/100", f"{count_dict['Robbery']} nearby")
-            col3.metric("Assault", f"{score_dict['Assault']}/100", f"{count_dict['Assault']} nearby")
-            col4.metric("Auto Theft", f"{score_dict['Auto Theft']}/100", f"{count_dict['Auto Theft']} nearby")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Theft Over $5000", f"{score_dict['Theft Over $5000']}/100", f"{count_dict['Theft Over $5000']} nearby")
+            col2.metric("Break & Enter", f"{score_dict['Break & Enter']}/100", f"{count_dict['Break & Enter']} nearby")
+            col3.metric("Robbery", f"{score_dict['Robbery']}/100", f"{count_dict['Robbery']} nearby")
+            col4.metric("Assault", f"{score_dict['Assault']}/100", f"{count_dict['Assault']} nearby")
+            col5.metric("Auto Theft", f"{score_dict['Auto Theft']}/100", f"{count_dict['Auto Theft']} nearby")
 
             st.header("AI-Assisted CPTED Risk Report")
 
