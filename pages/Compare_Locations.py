@@ -17,7 +17,14 @@ def load_data():
     robbery["CRIME_TYPE"] = "Robbery"
     autotheft = pd.read_csv("autotheft.csv")
     autotheft["CRIME_TYPE"] = "Auto Theft"
-    all_crimes = pd.concat([assault, breakenter, robbery, autotheft], ignore_index=True)
+
+    theftover = pd.read_csv("theft_over.csv")
+    theftover["CRIME_TYPE"] = "Theft Over $5000"
+
+    all_crimes = pd.concat(
+        [assault, breakenter, robbery, autotheft, theftover],
+        ignore_index=True
+    )
     all_crimes = all_crimes[
         (all_crimes["LAT_WGS84"] > 43) & (all_crimes["LAT_WGS84"] < 44) &
         (all_crimes["LONG_WGS84"] > -80) & (all_crimes["LONG_WGS84"] < -79)
@@ -44,18 +51,30 @@ def calc_scores(df, lat, lon):
     city_avg_assault = len(df[df["CRIME_TYPE"] == "Assault"]) / 140
     city_avg_robbery = len(df[df["CRIME_TYPE"] == "Robbery"]) / 140
     city_avg_auto = len(df[df["CRIME_TYPE"] == "Auto Theft"]) / 140
+    city_avg_theft = len(df[df["CRIME_TYPE"] == "Theft Over $5000"]) / 140
 
     be_count = get_nearby("Break & Enter")
     assault_count = get_nearby("Assault")
     robbery_count = get_nearby("Robbery")
     auto_count = get_nearby("Auto Theft")
+    theft_count = get_nearby("Theft Over $5000")
 
     be = calc_score(be_count, city_avg_be)
     assault = calc_score(assault_count, city_avg_assault)
     robbery = calc_score(robbery_count, city_avg_robbery)
     auto = calc_score(auto_count, city_avg_auto)
+    theft = calc_score(theft_count, city_avg_theft)
 
-    overall = round((be * 0.4) + (robbery * 0.3) + (assault * 0.2) + (auto * 0.1), 1)
+    overall = round(
+        (theft * 0.30) +
+        (be * 0.25) +
+        (robbery * 0.25) +
+        (assault * 0.15) +
+        (auto * 0.05),
+        1
+    )
+
+    overall = min(overall, 100)
 
     return {
         "Overall": overall,
@@ -63,11 +82,13 @@ def calc_scores(df, lat, lon):
         "Robbery": robbery,
         "Assault": assault,
         "Auto Theft": auto,
+        "Theft Over $5000": theft,
+        "Theft_count": int(theft_count),
         "BE_count": int(be_count),
         "Robbery_count": int(robbery_count),
         "Assault_count": int(assault_count),
         "Auto_count": int(auto_count),
-        "Total_count": int(be_count + assault_count + robbery_count + auto_count)
+        "Total_count": int(theft_count + be_count + assault_count + robbery_count + auto_count)
     }
 
 def risk_label(score):
@@ -92,6 +113,30 @@ def risk_summary(score, address):
 
 def get_recommendations(crime_type, score):
     recs = {
+        "Theft Over $5000": {
+    "low": [
+        "Standard loss prevention procedures",
+        "Basic CCTV at exits"
+    ],
+    "moderate": [
+        "EAS tagging on high-value merchandise",
+        "Dedicated loss prevention staff during peak hours",
+        "CCTV covering high-value areas"
+    ],
+    "high": [
+        "Full EAS system throughout store",
+        "Plainclothes loss prevention staff",
+        "Locked cases for high-value items",
+        "Receipt checking at exits"
+    ],
+    "critical": [
+        "Dedicated loss prevention team",
+        "Real-time CCTV monitoring",
+        "Access control on stockroom",
+        "Comprehensive EAS system",
+        "Regular staff theft-prevention training"
+    ]
+},
         "Break & Enter": {
             "low": ["Maintain standard door and window locks", "Basic CCTV coverage at entrances"],
             "moderate": ["Upgrade to commercial-grade locks", "Install alarm system", "Add CCTV to stockroom and back entrance"],
@@ -182,9 +227,9 @@ if st.button("Compare Locations"):
 
                 # Visual bar chart comparison
                 st.header("Score Comparison Chart")
-                categories = ["Overall", "Break & Enter", "Robbery", "Assault", "Auto Theft"]
-                vals1 = [scores1["Overall"], scores1["Break & Enter"], scores1["Robbery"], scores1["Assault"], scores1["Auto Theft"]]
-                vals2 = [scores2["Overall"], scores2["Break & Enter"], scores2["Robbery"], scores2["Assault"], scores2["Auto Theft"]]
+                categories = ["Overall", "Theft Over $5000", "Break & Enter", "Robbery", "Assault", "Auto Theft"]
+                vals1 = [scores1["Overall"], scores1["Theft Over $5000"], scores1["Break & Enter"], scores1["Robbery"], scores1["Assault"], scores1["Auto Theft"]]
+                vals2 = [scores2["Overall"], scores2["Theft Over $5000"], scores2["Break & Enter"], scores2["Robbery"], scores2["Assault"], scores2["Auto Theft"]]
 
                 x = np.arange(len(categories))
                 width = 0.35
@@ -215,9 +260,9 @@ if st.button("Compare Locations"):
                 # Incident count breakdown
                 st.header("Nearby Incident Counts")
                 incident_data = {
-                    "Crime Type": ["Break & Enter", "Robbery", "Assault", "Auto Theft", "Total"],
-                    "Store 1 Incidents": [scores1["BE_count"], scores1["Robbery_count"], scores1["Assault_count"], scores1["Auto_count"], scores1["Total_count"]],
-                    "Store 2 Incidents": [scores2["BE_count"], scores2["Robbery_count"], scores2["Assault_count"], scores2["Auto_count"], scores2["Total_count"]],
+                    "Crime Type": ["Theft Over $5000", "Break & Enter", "Robbery", "Assault", "Auto Theft", "Total"],
+                    "Store 1 Incidents": [scores1["Theft_count"], scores1["BE_count"], scores1["Robbery_count"], scores1["Assault_count"], scores1["Auto_count"], scores1["Total_count"]],
+                    "Store 2 Incidents": [scores2["Theft_count"], scores2["BE_count"], scores2["Robbery_count"], scores2["Assault_count"], scores2["Auto_count"], scores2["Total_count"]],
                 }
                 st.dataframe(pd.DataFrame(incident_data), use_container_width=True)
 
@@ -240,6 +285,7 @@ if st.button("Compare Locations"):
                 st.write(f"**{higher_risk_address}**")
 
                 for crime_type, key in [
+                    ("Theft Over $5000", "Theft Over $5000"),
                     ("Break & Enter", "Break & Enter"),
                     ("Robbery", "Robbery"),
                     ("Assault", "Assault"),
