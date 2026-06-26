@@ -1,3 +1,10 @@
+import io
+from datetime import date
+from html import escape
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -172,6 +179,135 @@ def get_recommendations(crime_type, score):
         level = "low"
     return recs[crime_type][level]
 
+def generate_compare_pdf(address1, address2, scores1, scores2):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    styles = getSampleStyleSheet()
+    story = []
+
+    logo = Image("riskterrain_logo.png")
+    logo.drawWidth = 220
+    logo.drawHeight = 120
+
+    story.append(logo)
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Location Comparison Report", styles["Heading1"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(f"<b>Store 1:</b> {escape(address1)}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Store 2:</b> {escape(address2)}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Report Date:</b> {date.today().strftime('%B %d, %Y')}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    if scores1["Overall"] > scores2["Overall"]:
+        verdict = f"Store 1 is higher risk by {round(scores1['Overall'] - scores2['Overall'], 1)} points."
+    elif scores2["Overall"] > scores1["Overall"]:
+        verdict = f"Store 2 is higher risk by {round(scores2['Overall'] - scores1['Overall'], 1)} points."
+    else:
+        verdict = "Both locations have equal overall risk scores."
+
+    story.append(Paragraph("<b>Executive Verdict</b>", styles["Heading2"]))
+    story.append(Paragraph(escape(verdict), styles["Normal"]))
+    story.append(Spacer(1, 12))
+    
+    if scores1["Overall"] > scores2["Overall"]:
+        higher_store = "Store 1"
+        lower_store = "Store 2"
+        higher_scores = scores1
+    elif scores2["Overall"] > scores1["Overall"]:
+        higher_store = "Store 2"
+        lower_store = "Store 1"
+        higher_scores = scores2
+    else:
+        higher_store = "Both stores"
+        lower_store = "Neither store"
+        higher_scores = scores1
+
+    summary_text = (
+        f"{higher_store} has the higher overall risk profile. The largest areas of concern are the crime categories "
+        f"with the highest scores, especially any category rated High or Critical. This comparison can help decide "
+        f"which location should be prioritized first for security planning, CPTED improvements, and loss prevention review."
+    )
+
+    story.append(Paragraph("<b>Quick Summary</b>", styles["Heading2"]))
+    story.append(Paragraph(escape(summary_text), styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    table_data = [
+        ["Category", "Store 1", "Store 2"],
+        ["Overall", scores1["Overall"], scores2["Overall"]],
+        ["Theft Over $5000", scores1["Theft Over $5000"], scores2["Theft Over $5000"]],
+        ["Break & Enter", scores1["Break & Enter"], scores2["Break & Enter"]],
+        ["Robbery", scores1["Robbery"], scores2["Robbery"]],
+        ["Assault", scores1["Assault"], scores2["Assault"]],
+        ["Auto Theft", scores1["Auto Theft"], scores2["Auto Theft"]],
+    ]
+
+    table = Table(table_data, colWidths=[180, 120, 120])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#e8f1f8")]),
+    ]))
+
+    story.append(Paragraph("<b>Risk Score Comparison</b>", styles["Heading2"]))
+    story.append(table)
+    story.append(Spacer(1, 16))
+
+    focus_areas = [
+        "Access control at entrances, exits, and rear doors",
+        "Lighting and visibility around the storefront",
+        "Cash handling and robbery prevention procedures",
+        "High-value merchandise protection and stockroom access control",
+        "Staff safety, de-escalation, and incident response procedures"
+    ]
+
+    story.append(Paragraph("<b>Recommended Focus Areas</b>", styles["Heading2"]))
+    for area in focus_areas:
+        story.append(Paragraph(f"• {escape(area)}", styles["Normal"]))
+        story.append(Spacer(1, 4))
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("<b>Methodology</b>", styles["Heading2"]))
+    story.append(Paragraph(
+        "This comparison uses historical Toronto crime data to compare nearby incident concentrations and generate relative retail safety scores.",
+        styles["Normal"]
+    ))
+
+    story.append(Spacer(1, 16))
+    count_table_data = [
+        ["Crime Type", "Store 1 Incidents", "Store 2 Incidents"],
+        ["Theft Over $5000", scores1["Theft_count"], scores2["Theft_count"]],
+        ["Break & Enter", scores1["BE_count"], scores2["BE_count"]],
+        ["Robbery", scores1["Robbery_count"], scores2["Robbery_count"]],
+        ["Assault", scores1["Assault_count"], scores2["Assault_count"]],
+        ["Auto Theft", scores1["Auto_count"], scores2["Auto_count"]],
+        ["Total", scores1["Total_count"], scores2["Total_count"]],
+    ]
+
+    count_table = Table(count_table_data, colWidths=[180, 120, 120])
+    count_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#e8f1f8")]),
+    ]))
+
+    story.append(Paragraph("<b>Nearby Incident Count Comparison</b>", styles["Heading2"]))
+    story.append(count_table)
+    story.append(Spacer(1, 16))
+    story.append(Paragraph("Generated by RiskTerrain™", styles["Normal"]))
+    story.append(Paragraph("AI-Assisted CPTED Analytics", styles["Normal"]))
+    story.append(Paragraph("Built by Alex Babb — University of Guelph", styles["Normal"]))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 df = load_data()
 geolocator = Nominatim(user_agent="cpted_compare")
 
@@ -276,6 +412,15 @@ if st.button("Compare Locations"):
                     st.error(f"**Store 2 is higher risk** by {diff} points — priority location for security investment")
                 else:
                     st.info("Both locations have equal risk scores")
+
+                pdf = generate_compare_pdf(address1, address2, scores1, scores2)
+
+                st.download_button(
+                    label="📄 Download Comparison Report",
+                    data=pdf,
+                    file_name="riskterrain_location_comparison.pdf",
+                    mime="application/pdf"
+                )
 
                 # Recommendations for higher risk store
                 higher_risk_scores = scores1 if scores1["Overall"] >= scores2["Overall"] else scores2
