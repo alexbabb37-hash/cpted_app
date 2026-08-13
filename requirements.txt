@@ -1,11 +1,6 @@
 streamlit
 pandas
-plotly
-matplotlib
-geopandas
-shapely
-pyproj
-openpyxl
+numpy
 geopy
-folium
-streamlit-folium
+reportlab
+pytest

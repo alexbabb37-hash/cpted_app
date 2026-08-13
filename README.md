@@ -1,27 +1,59 @@
-# 🏪 Risk Terrain: AI-Assisted CPTED Risk Assessment Engine
+# Locivra
 
-Risk Terrain is an analytical platform designed to convert raw spatial crime data into professional, actionable Crime Prevention Through Environmental Design (CPTED) property strategies. Built specifically for retail operations and commercial real estate assets, the application evaluates localized micro-climate risk profiles to generate data-driven site intervention blueprints.
+Locivra helps multi-location organizations identify which Toronto locations warrant deeper security review by combining historical reported-crime exposure with location context.
 
-## 🚀 Core Features
-* **Site-Specific Risk Diagnostics:** Input any commercial address to calculate immediate localized safety scores based on multi-year crime baselines.
-* **Granular Telemetry Sub-Scores:** Breaks down property risks into four primary operational vectors: Break & Enter, Robbery, Assault, and Auto Theft.
-* **AI-Assisted CPTED Playbooks:** Dynamically evaluates risk drivers and outlines tailored environmental strategies.
-* **Automated Executive Deliverables:** Instantly compiles and builds an enterprise-ready, branded PDF Site Security Assessment Report complete with qualitative risk confidence ratings.
-* **Batch Analytics (Beta):** High-volume CSV batch uploader built for corporate security directors managing multi-location asset portfolios.
+Locivra is decision support. It does not predict crime, determine whether a location is safe, or replace internal incident data, professional judgment, CPTED assessment, or a physical site visit.
 
-## 🛠️ Technology Stack
-* **Frontend/Dashboard:** Streamlit
-* **Geospatial Processing:** Geopy (Nominatim API)
-* **Data Science & Analytics:** Pandas, NumPy
-* **Document Automation Engine:** ReportLab
+## Current workflows
 
-## 📋 Getting Started
+- Location assessment with score decomposition, evidence map, and radius sensitivity
+- Two-location comparison using one shared methodology
+- Portfolio ranking for 5-20 locations with percentiles and relative review tiers
+- Branded PDF reports with data provenance and methodology boundaries
+- Optional client evidence fields kept separate from the public-data exposure score
+- Equal-window 6-month and 12-month historical changes plus a 24-month monthly trend
+- Raw-count change and weighted-exposure change displayed as separate measures
+- Consistent small-sample and unstable-baseline flags across every trend table
+- Dynamic source-file coverage, row-quality warnings, and data provenance
+- Portfolio ranking sensitivity across four radii and four disclosed weight profiles
+- Automated score reconciliation for on-screen results, CSV outputs, and PDF reports
 
-### Prerequisites
-Ensure you have Python 3.8+ installed on your system.
+## Data and methodology
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/alexbabb37-hash/cpted_app.git](https://github.com/alexbabb37-hash/cpted_app.git)
-   cd cpted_app
+- Source: Toronto Police Service Public Safety Data Portal
+- Coverage: 2014-2026 report years
+- Newest configured report date: March 31, 2026
+- Geography: Toronto only
+- Methodology: Version 1.1 prototype
+
+The model uses geodesic distance, linear distance decay, a citywide prototype baseline, and five published category weights. See `locivra_core.py` for the implemented formula and the in-app methodology panels for interpretation.
+
+## Run locally
+
+```bash
+cd /Users/alexbabb/Desktop/cpted_app
+python3 -m pip install -r requirements.txt
+python3 -m streamlit run app.py
+```
+
+Open `http://localhost:8501` if the browser does not open automatically.
+
+## Credibility checks
+
+Run the automated calculation and report checks before a client demonstration or release:
+
+```bash
+cd /Users/alexbabb/Desktop/cpted_app
+python3 -m pytest -q
+```
+
+The checks verify that category weights sum to 100%, composite scores reconcile,
+raw and weighted trend percentages match their displayed inputs, sensitivity tables
+contain every location and assumption, provenance is derived from the configured
+files, and all three PDF generators complete successfully.
+
+## Portfolio CSV
+
+Download the template from the Portfolio Priority Ranking screen. Only `Address` is required. Recommended fields include Location ID, Location Name, location type, internal incident counts, loss amount, control coverage, and client notes.
+
+Client inputs are retained for validation and reporting but do not change the Version 1.1 public-data exposure score.
