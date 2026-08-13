@@ -1,424 +1,140 @@
-import streamlit as st
+from pathlib import Path
+import sys
+
 import pandas as pd
-import json
-import re
-from geopy.geocoders import Nominatim
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
-import io
-from datetime import date
-from html import escape
-from reportlab.platypus import Image
+import streamlit as st
 
-st.title("🏪 Retail Safety Risk Assessment")
-st.write("Enter a store address to generate an AI-assisted CPTED risk assessment and safety recommendations.")
+PROJECT = Path(__file__).resolve().parents[1]
+if str(PROJECT) not in sys.path:
+    sys.path.insert(0, str(PROJECT))
 
-@st.cache_data
-def load_data():
-    assault = pd.read_csv("toronto_crime.csv")
-    assault["CRIME_TYPE"] = "Assault"
+from locivra_core import CRIME_WEIGHTS, WEIGHT_PROFILES, data_provenance, data_quality_summary, geocode_address, nearby_incidents, radius_sensitivity, reconcile_location_result, result_warnings, score_location, score_under_weights, temporal_trends
+from locivra_reports import build_site_report
 
-    breakenter = pd.read_csv("breakenter.csv")
-    breakenter["CRIME_TYPE"] = "Break & Enter"
+st.title("🏪 Location Priority Assessment")
+st.caption("Decision support for prioritizing deeper security review across Toronto locations.")
 
-    robbery = pd.read_csv("robbery.csv")
-    robbery["CRIME_TYPE"] = "Robbery"
+with st.expander("Methodology and responsible use"):
+    st.markdown("""
+Locivra Version 1.0 uses five Toronto Police Service historical incident datasets. It measures
+distance-weighted exposure inside the selected radius, compares it with a transparent citywide
+baseline, and combines category scores using published retail-relevance weights.
 
-    autotheft = pd.read_csv("autotheft.csv")
-    autotheft["CRIME_TYPE"] = "Auto Theft"
+Environmental information is displayed as **context only** and does not change the score.
+This is not crime prediction, a safety certification, or a replacement for internal incidents,
+professional judgment, CPTED assessment, or a physical site visit.
+""")
 
-    theftover = pd.read_csv("theft_over.csv")
-    theftover["CRIME_TYPE"] = "Theft Over $5000"
+left, right = st.columns([3, 1])
+with left:
+    address = st.text_input("Toronto location", placeholder="100 Queen St W, Toronto, ON")
+with right:
+    radius = st.selectbox("Analysis radius", [250, 500, 750, 1000], index=1, format_func=lambda x: f"{x} m")
 
-    all_crimes = pd.concat(
-        [assault, breakenter, robbery, autotheft, theftover],
-        ignore_index=True
-    )
-
-    all_crimes = all_crimes[
-        (all_crimes["LAT_WGS84"] > 43) & (all_crimes["LAT_WGS84"] < 44) &
-        (all_crimes["LONG_WGS84"] > -80) & (all_crimes["LONG_WGS84"] < -79)
-    ]
-
-    return all_crimes
-
-def risk_label(score):
-    if score >= 75:
-        return "Critical Risk"
-    elif score >= 60:
-        return "High Risk"
-    elif score >= 40:
-        return "Moderate Risk"
-    else:
-        return "Low Risk"
-
-def short_risk_label(score):
-    if score >= 75:
-        return "Critical"
-    elif score >= 60:
-        return "High"
-    elif score >= 40:
-        return "Moderate"
-    else:
-        return "Low"
-
-def get_score_summary(score):
-    if score >= 75:
-        return "well above the city comparison baseline"
-    elif score >= 60:
-        return "above the city comparison baseline"
-    elif score >= 40:
-        return "near a moderate comparison level"
-    else:
-        return "below the city comparison baseline"
-
-def get_crime_guidance(crime_type, score):
-    guidance = {
-                "Theft Over $5000": {
-            "driver": "high-value merchandise theft exposure, stockroom access, product visibility, and loss prevention gaps",
-            "areas": [
-                "High-value merchandise displays",
-                "Stockroom entrances",
-                "Customer exit routes",
-                "Checkout and bag-check areas",
-                "Camera coverage around theft-prone aisles"
-            ],
-            "strategies": [
-                "Use EAS tagging or locked display cases for high-value merchandise",
-                "Improve staff visibility over theft-prone areas",
-                "Strengthen stockroom access control",
-                "Improve CCTV coverage around exits and high-value product areas",
-                "Use clear sightlines and store layout to reduce concealment opportunities"
-            ]
-        },
-        "Break & Enter": {
-            "driver": "property access risk, after-hours vulnerability, and weak perimeter control",
-            "areas": [
-                "Front and rear entrances",
-                "Delivery doors and service corridors",
-                "Window lines and commercial glazing",
-                "Exterior lighting and concealment points"
-            ],
-            "strategies": [
-                "Strengthen access control at doors, windows, and service entrances",
-                "Improve lighting around rear access points and storefront edges",
-                "Reduce concealment opportunities near entrances and exterior walls",
-                "Use territorial reinforcement such as clear boundaries, signage, and maintained storefront conditions"
-            ]
-        },
-        "Robbery": {
-            "driver": "street-level opportunity, cash-handling exposure, pedestrian movement, and escape route availability",
-            "areas": [
-                "Point-of-sale area",
-                "Customer entrance and exit routes",
-                "Sightlines from the street into the store",
-                "Nearby pedestrian gathering points and transit connections"
-            ],
-            "strategies": [
-                "Improve visibility between the cashier area, entrance, and public realm",
-                "Use cash-control procedures, drop safes, and reduced drawer balances",
-                "Maintain clear sightlines and remove unnecessary visual obstructions",
-                "Support natural surveillance through active frontages and well-lit entrances"
-            ]
-        },
-        "Assault": {
-            "driver": "interpersonal conflict risk, public disorder, crowding, and visibility conditions",
-            "areas": [
-                "Entrances and customer gathering areas",
-                "Aisles and blind spots",
-                "Checkout visibility",
-                "Exterior waiting areas and sidewalks"
-            ],
-            "strategies": [
-                "Improve natural surveillance and staff visibility across the floor",
-                "Maintain clear sightlines through store layout and product placement",
-                "Use lighting to reduce hidden or poorly observed areas",
-                "Train staff in de-escalation and establish clear incident response procedures"
-            ]
-        },
-        "Auto Theft": {
-            "driver": "parking exposure, offender mobility, vehicle target availability, and low surveillance",
-            "areas": [
-                "Customer and staff parking areas",
-                "Rear lots and loading areas",
-                "Lighting coverage across vehicle areas",
-                "Camera visibility and access points"
-            ],
-            "strategies": [
-                "Improve lighting and visibility across parking and loading areas",
-                "Use cameras and signage to increase perceived guardianship",
-                "Reduce uncontrolled access to staff parking or rear lots",
-                "Maintain clear sightlines between the building and vehicle areas"
-            ]
-        }
-    }
-
-    return guidance[crime_type]
-
-def get_assessment(address, scores, counts, overall_score):
-    label = risk_label(overall_score)
-
-    sorted_threats = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    primary_threat = sorted_threats[0][0]
-    secondary_threat = sorted_threats[1][0]
-
-    executive_summary = (
-        f"A localized assessment of {address} produced an overall retail safety score of "
-        f"{overall_score}/100, classifying the site as {label}. The main risk driver is "
-        f"{primary_threat}, with {secondary_threat} also contributing to the location’s risk profile. "
-        f"This assessment provides data-driven guidance to support security planning and CPTED decision-making."
-    )
-
-    key_drivers = []
-    areas_to_examine = []
-    recommendations = []
-
-    for crime_type, score in sorted_threats:
-        if score >= 40:
-            guidance = get_crime_guidance(crime_type, score)
-
-            key_drivers.append(
-                f"{crime_type}: {score}/100 ({short_risk_label(score)}) — {counts[crime_type]} nearby incidents, "
-                f"{get_score_summary(score)}. Primary concern: {guidance['driver']}."
-            )
-
-            areas_to_examine.extend(guidance["areas"])
-            recommendations.extend(guidance["strategies"])
-
-    if not key_drivers:
-        key_drivers.append(
-            "No major crime category is currently elevated based on the selected comparison method."
-        )
-        areas_to_examine = [
-            "Entrances and exits",
-            "Exterior lighting",
-            "Parking areas",
-            "Sightlines from public areas"
-        ]
-        recommendations = [
-            "Maintain clear sightlines and good lighting",
-            "Continue monitoring local crime conditions",
-            "Preserve clean, well-maintained exterior conditions",
-            "Review access control and staff safety procedures periodically"
-        ]
-
-    areas_to_examine = list(dict.fromkeys(areas_to_examine))
-    recommendations = list(dict.fromkeys(recommendations))
-
-    return executive_summary, key_drivers, areas_to_examine, recommendations
-
-def generate_pdf(address, overall_score, score_dict, count_dict, executive_summary, key_drivers, areas_to_examine, recommendations):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
-    styles = getSampleStyleSheet()
-    story = []
-
-    logo = Image("riskterrain_logo.png")
-    logo.drawWidth = 220
-    logo.drawHeight = 120
-
-    story.append(logo)
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("Retail Safety Risk Assessment", styles["Heading1"]))
-    story.append(Spacer(1, 12))
-    story.append(Paragraph(f"<b>Target Location:</b> {escape(address)}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Assessment Date:</b> {date.today().strftime('%B %d, %Y')}", styles["Normal"]))
-    story.append(Spacer(1, 12))
-
-    label = risk_label(overall_score)
-    story.append(Paragraph(f"<b>Overall Retail Safety Score: {overall_score}/100 — {label}</b>", styles["Heading1"]))
-    story.append(Paragraph("<b>Risk Confidence:</b> Preliminary — based on available historical Toronto crime data within the selected location radius.", styles["Normal"]))
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph("<b>1. Executive Summary</b>", styles["Heading2"]))
-    story.append(Paragraph(escape(executive_summary), styles["Normal"]))
-    story.append(Spacer(1, 14))
-
-    story.append(Paragraph("<b>2. Crime Sub-Scores</b>", styles["Heading2"]))
-    story.append(Spacer(1, 6))
-
-    table_data = [
-        ["Crime Type", "Nearby Incidents", "Score", "Risk Level"],
-        ["Theft Over $5000", str(count_dict["Theft Over $5000"]), f"{score_dict['Theft Over $5000']}/100", short_risk_label(score_dict["Theft Over $5000"])],
-        ["Break & Enter", str(count_dict["Break & Enter"]), f"{score_dict['Break & Enter']}/100", short_risk_label(score_dict["Break & Enter"])],
-        ["Robbery", str(count_dict["Robbery"]), f"{score_dict['Robbery']}/100", short_risk_label(score_dict["Robbery"])],
-        ["Assault", str(count_dict["Assault"]), f"{score_dict['Assault']}/100", short_risk_label(score_dict["Assault"])],
-        ["Auto Theft", str(count_dict["Auto Theft"]), f"{score_dict['Auto Theft']}/100", short_risk_label(score_dict["Auto Theft"])],
-    ]
-
-    table = Table(table_data, colWidths=[150, 110, 90, 90])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#e8f1f8")]),
-    ]))
-    story.append(table)
-    story.append(Spacer(1, 14))
-
-    story.append(Paragraph("<b>3. Key Risk Drivers</b>", styles["Heading2"]))
-    for item in key_drivers:
-        story.append(Paragraph(f"• {escape(item)}", styles["Normal"]))
-        story.append(Spacer(1, 5))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("<b>4. Priority Vulnerability Areas</b>", styles["Heading2"]))
-    for item in areas_to_examine:
-        story.append(Paragraph(f"• {escape(item)}", styles["Normal"]))
-        story.append(Spacer(1, 5))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("<b>5. Recommended CPTED Interventions</b>", styles["Heading2"]))
-    for item in recommendations:
-        story.append(Paragraph(f"• {escape(item)}", styles["Normal"]))
-        story.append(Spacer(1, 5))
-
-    story.append(Spacer(1, 18))
-    story.append(Paragraph("<b>Limitations:</b> This assessment is derived from historical Toronto Police Service crime data and applies CPTED principles to identify priority vulnerability areas and recommended interventions. Findings should be considered alongside operational knowledge and site-specific conditions.", styles["Normal"]))
-    story.append(Spacer(1, 16))
-    story.append(Paragraph("Generated by RiskTerrain™", styles["Normal"]))
-    story.append(Paragraph("AI-Assisted CPTED Analytics", styles["Normal"]))
-    story.append(Paragraph("Built by Alex Babb — University of Guelph", styles["Normal"]))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-df = load_data()
-
-address = st.text_input("Enter store address", "500 Yonge St, Toronto, Ontario")
-
-if st.button("Generate Safety Score"):
-    geolocator = Nominatim(user_agent="cpted_retail")
-
+if st.button("Assess location", type="primary", use_container_width=True):
+    if not address.strip():
+        st.warning("Enter a Toronto address to continue.")
+        st.stop()
     try:
-        location = geolocator.geocode(address)
+        with st.spinner("Locating and assessing the site…"):
+            latitude, longitude, matched_address = geocode_address(address)
+            result = score_location(matched_address, latitude, longitude, radius, submitted_address=address)
+    except (ValueError, RuntimeError) as error:
+        st.error(str(error))
+        st.stop()
 
-        if location:
-            lat = location.latitude
-            lon = location.longitude
+    st.session_state["locivra_site_result"] = result
 
-            st.success(f"Location found: {round(lat, 5)}, {round(lon, 5)}")
+result = st.session_state.get("locivra_site_result")
+if result:
+    st.subheader("Assessment result")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Priority score", f"{result.overall_score:.1f}/100")
+    c2.metric("Review priority", result.priority_label.replace(" review priority", ""))
+    c3.metric("Radius", f"{result.radius_metres} m")
+    st.caption(f"Submitted: {result.submitted_address or result.address}  |  Matched: {result.address}")
 
-            radius = 0.005
+    rows = []
+    for category, item in result.categories.items():
+        rows.append({
+            "Crime category": category,
+            "Raw incidents": item.raw_incidents,
+            "Distance-weighted exposure": item.weighted_exposure,
+            "Category score": item.score,
+            "Model weight": f"{item.weight:.0%}",
+            "Contribution": item.contribution,
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    audit = reconcile_location_result(result)
+    if audit["Status"] == "PASS":
+        st.success(f"Calculation audit passed. Recalculated score: {audit['Recalculated score']:.1f}; display rounding difference: {audit['Display rounding difference']:+.1f} points.")
+    else:
+        st.error(f"Calculation audit requires review: {audit['Issues']}")
+    for warning in result_warnings(result):
+        st.warning(warning)
 
-            def get_nearby(crime_type):
-                subset = df[df["CRIME_TYPE"] == crime_type]
-                nearby = (
-                    ((subset["LAT_WGS84"] - lat) ** 2 +
-                     (subset["LONG_WGS84"] - lon) ** 2) ** 0.5
-                ) < radius
-                return int(nearby.sum())
+    st.subheader("Evidence map")
+    points = nearby_incidents(result.latitude, result.longitude, result.radius_metres)
+    st.map(points[["latitude", "longitude"]], use_container_width=True)
+    st.caption(f"{len(points):,} displayed historical incident points inside the selected radius. Dense results are deterministically sampled for performance; scoring uses all records.")
 
-            count_dict = {
-                "Theft Over $5000": get_nearby("Theft Over $5000"),
-                "Break & Enter": get_nearby("Break & Enter"),
-                "Robbery": get_nearby("Robbery"),
-                "Assault": get_nearby("Assault"),
-                "Auto Theft": get_nearby("Auto Theft")
-            }
+    with st.expander("Radius sensitivity", expanded=True):
+        sensitivity = radius_sensitivity(result.address, result.latitude, result.longitude)
+        st.line_chart(sensitivity.set_index("Radius (m)")["Priority score"])
+        st.dataframe(sensitivity, hide_index=True, use_container_width=True)
+        st.caption("A result that remains elevated across several radii is a more stable review signal. This is historical sensitivity analysis, not a forecast.")
 
-            city_avg = {
-                "Theft Over $5000": len(df[df["CRIME_TYPE"] == "Theft Over $5000"]) / 140,
-                "Break & Enter": len(df[df["CRIME_TYPE"] == "Break & Enter"]) / 140,
-                "Robbery": len(df[df["CRIME_TYPE"] == "Robbery"]) / 140,
-                "Assault": len(df[df["CRIME_TYPE"] == "Assault"]) / 140,
-                "Auto Theft": len(df[df["CRIME_TYPE"] == "Auto Theft"]) / 140
-            }
+    with st.expander("Weight-profile sensitivity"):
+        weight_rows = [{"Weight profile": name, "Recombined score": score_under_weights(result, profile)} for name, profile in WEIGHT_PROFILES.items()]
+        st.dataframe(pd.DataFrame(weight_rows), hide_index=True, use_container_width=True)
+        st.caption("These are disclosed stress tests using the same category scores. They do not replace the published profile.")
 
-            def calc_score(count, avg):
-                ratio = count / max(avg, 1)
-                score = min(100, ratio * 50)
-                return round(score, 1)
+    st.subheader("Historical direction")
+    with st.spinner("Calculating equal-window historical comparisons…"):
+        trends = temporal_trends(result.latitude, result.longitude, result.radius_metres)
+    st.caption(f"Anchored to the newest configured report date: {trends['cutoff']}. Exposure combines distance decay and the published category weights.")
+    metrics = st.columns(2)
+    for column, (_, trend_row) in zip(metrics, trends["comparisons"].iterrows()):
+        change = trend_row["Exposure change (%)"]
+        delta = "Percentage withheld" if pd.isna(change) else f"{change:+.1f}% weighted exposure"
+        column.metric(trend_row["Period"], f"{trend_row['Current exposure']:.1f}", delta)
+        raw_change = trend_row["Count change (%)"]
+        raw_text = "withheld" if pd.isna(raw_change) else f"{raw_change:+.1f}%"
+        column.caption(f"Raw incidents: {trend_row['Current incidents']} current vs {trend_row['Previous incidents']} prior ({raw_text}). {trend_row['Stability note']}.")
+    monthly = trends["monthly"].set_index("Month")
+    st.line_chart(monthly["Exposure"])
+    with st.expander("Category-level 12-month changes"):
+        st.dataframe(trends["categories"], hide_index=True, use_container_width=True)
+    st.caption("These are descriptive historical changes, not forecasts. Percentages are withheld when the prior exposure baseline is too small.")
 
-            score_dict = {
-                "Theft Over $5000": calc_score(count_dict["Theft Over $5000"], city_avg["Theft Over $5000"]),
-                "Break & Enter": calc_score(count_dict["Break & Enter"], city_avg["Break & Enter"]),
-                "Robbery": calc_score(count_dict["Robbery"], city_avg["Robbery"]),
-                "Assault": calc_score(count_dict["Assault"], city_avg["Assault"]),
-                "Auto Theft": calc_score(count_dict["Auto Theft"], city_avg["Auto Theft"])
-            }
+    drivers = sorted(result.categories.values(), key=lambda item: item.contribution, reverse=True)[:3]
+    st.subheader("What to examine next")
+    st.write("Use these strongest contributors as questions for internal validation and a professional site review:")
+    for item in drivers:
+        st.markdown(f"- **{item.category}:** contributes **{item.contribution:.1f} points** to the overall score ({item.score:.1f}/100 category score × {item.weight:.0%} weight), based on {item.raw_incidents} incidents in the selected radius")
 
-            overall_score = round(
-                (score_dict["Theft Over $5000"] * 0.30) +
-                (score_dict["Break & Enter"] * 0.35) +
-                (score_dict["Robbery"] * 0.30) +
-                (score_dict["Assault"] * 0.25) +
-                (score_dict["Auto Theft"] * 0.10),
-                1
-            )
+    with st.expander("Environmental and neighbourhood context", expanded=True):
+        context = result.context
+        st.caption(context.get("note", "Context only; not included in the score."))
+        a, b, c = st.columns(3)
+        a.metric("Nearest TTC", context.get("nearest_ttc_station", "Not available"))
+        b.metric("Parks in radius", context.get("parks_within_radius", "—"))
+        c.metric("Street-light poles", context.get("street_light_poles_within_radius", "—"))
+        neighbourhood = context.get("approximate_neighbourhood", "Not available")
+        population = context.get("approximate_neighbourhood_population")
+        st.write(f"Approximate neighbourhood: **{neighbourhood}**" + (f" · Population: **{population:,}**" if population else ""))
 
-            overall_score = min(overall_score, 100)
+    st.info("Next step: compare the result with internal incidents and staff knowledge. Select controls only after a qualified site-level review.")
+    pdf = build_site_report(result)
+    safe_name = "".join(ch if ch.isalnum() else "_" for ch in result.address[:45]).strip("_")
+    st.download_button("Download polished PDF assessment", pdf.getvalue(), f"Locivra_Assessment_{safe_name}.pdf", "application/pdf", use_container_width=True)
 
-            executive_summary, key_drivers, areas_to_examine, recommendations = get_assessment(
-                address, score_dict, count_dict, overall_score
-            )
+with st.expander("Published category weights"):
+    st.dataframe(pd.DataFrame([{"Category": key, "Weight": f"{value:.0%}"} for key, value in CRIME_WEIGHTS.items()]), hide_index=True, use_container_width=True)
 
-            st.header("Overall Retail Safety Score")
-
-            if overall_score >= 75:
-                st.error(f"### {overall_score} / 100 — {risk_label(overall_score)}")
-            elif overall_score >= 60:
-                st.warning(f"### {overall_score} / 100 — {risk_label(overall_score)}")
-            elif overall_score >= 40:
-                st.info(f"### {overall_score} / 100 — {risk_label(overall_score)}")
-            else:
-                st.success(f"### {overall_score} / 100 — {risk_label(overall_score)}")
-
-            st.header("Sub-Scores by Crime Type")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Theft Over $5000", f"{score_dict['Theft Over $5000']}/100", f"{count_dict['Theft Over $5000']} nearby")
-            col2.metric("Break & Enter", f"{score_dict['Break & Enter']}/100", f"{count_dict['Break & Enter']} nearby")
-            col3.metric("Robbery", f"{score_dict['Robbery']}/100", f"{count_dict['Robbery']} nearby")
-            col4.metric("Assault", f"{score_dict['Assault']}/100", f"{count_dict['Assault']} nearby")
-            col5.metric("Auto Theft", f"{score_dict['Auto Theft']}/100", f"{count_dict['Auto Theft']} nearby")
-
-            st.header("AI-Assisted CPTED Risk Report")
-
-            st.subheader("Executive Summary")
-            st.write(executive_summary)
-
-            st.subheader("Key Risk Drivers")
-            for item in key_drivers:
-                st.write(f"🔴 {item}")
-
-            st.subheader("Priority Vulnerability Areas")
-            for item in areas_to_examine:
-                st.write(f"• {item}")
-
-            st.subheader("Recommended CPTED Interventions")
-            for item in recommendations:
-                st.write(f"✅ {item}")
-
-            st.caption("This tool supports early-stage screening only. A formal CPTED review should include a site visit, environmental observations, stakeholder input, and professional judgment.")
-            st.caption("Risk Confidence: Preliminary — based on available historical Toronto crime data within the selected location radius.")
-
-            st.header("Download Report")
-            pdf = generate_pdf(
-                address,
-                overall_score,
-                score_dict,
-                count_dict,
-                executive_summary,
-                key_drivers,
-                areas_to_examine,
-                recommendations
-            )
-
-            clean_filename = re.sub(r"[^a-zA-Z0-9_-]", "_", address)
-            st.download_button(
-                label="📄 Download CPTED Risk Report",
-                data=pdf,
-                file_name=f"retail_safety_report_{clean_filename}.pdf",
-                mime="application/pdf"
-            )
-
-        else:
-            st.error("Address not found — try adding Toronto, Ontario to the address.")
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+with st.expander("Data provenance"):
+    st.dataframe(pd.DataFrame([data_provenance()]), hide_index=True, use_container_width=True)
+    quality = data_quality_summary()
+    st.dataframe(quality["files"], hide_index=True, use_container_width=True)
+    for warning in quality["warnings"]:
+        st.warning(warning)

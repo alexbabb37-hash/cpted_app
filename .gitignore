@@ -1,0 +1,18 @@
+# macOS and Python-generated files
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.streamlit/secrets.toml
+
+# Generated reports and visual QA artifacts
+output/
+tmp/
+
+# Local legacy copies retained outside the release
+archive/
