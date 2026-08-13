@@ -11,6 +11,7 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from locivra_core import data_provenance, data_quality_summary, geocode_address, portfolio_radius_sensitivity, reconcile_results, score_location, weight_sensitivity
+from locivra_privacy import SAFE_CLIENT_COLUMNS, clear_client_session, inspect_client_frame, safe_csv_frame, validate_upload_size
 from locivra_reports import build_portfolio_report
 
 st.title("📂 Portfolio Priority Ranking")
@@ -39,10 +40,15 @@ template = pd.DataFrame({
     "Client Notes": ["", ""],
 })
 st.download_button("Download CSV template", template.to_csv(index=False), "Locivra_Pilot_Template.csv", "text/csv")
-uploaded = st.file_uploader("Portfolio CSV", type=["csv"])
+authorized = st.checkbox("I am authorized to use this business-location data and confirm it contains no personal information, credentials, detailed incident narratives, photos or video.")
+uploaded = st.file_uploader("Portfolio CSV", type=["csv"], disabled=not authorized)
 radius = st.select_slider("Analysis radius for every location", options=[250, 500, 750, 1000], value=500, format_func=lambda x: f"{x} m")
 
 if uploaded is not None:
+    size_issues = validate_upload_size(getattr(uploaded, "size", None))
+    if size_issues:
+        st.error(size_issues[0])
+        st.stop()
     try:
         input_df = pd.read_csv(uploaded)
     except Exception:
@@ -50,6 +56,12 @@ if uploaded is not None:
         st.stop()
     if "Address" not in input_df.columns:
         st.error("The CSV needs a column named Address.")
+        st.stop()
+    privacy = inspect_client_frame(input_df, SAFE_CLIENT_COLUMNS)
+    if privacy["blocking_issues"]:
+        st.error("The upload was blocked by the client-data safeguard.")
+        for issue in privacy["blocking_issues"]:
+            st.warning(issue)
         st.stop()
     addresses = input_df["Address"].dropna().astype(str).map(str.strip)
     addresses = addresses[addresses.ne("")].drop_duplicates().tolist()
@@ -128,11 +140,14 @@ if portfolio:
         st.caption("Rank change is measured against the submitted-radius ranking under the published weights. Alternative profiles and radii are stress tests, not preferred answers.")
 
     csv_buffer = io.StringIO()
-    output.to_csv(csv_buffer, index=False)
+    safe_csv_frame(output).to_csv(csv_buffer, index=False)
     a, b = st.columns(2)
     a.download_button("Download detailed CSV", csv_buffer.getvalue(), "Locivra_Portfolio_Ranking.csv", "text/csv", use_container_width=True)
     pdf = build_portfolio_report(ranked)
     b.download_button("Download polished PDF report", pdf.getvalue(), "Locivra_Portfolio_Report.pdf", "application/pdf", use_container_width=True)
+    if st.button("Clear portfolio client data from this session"):
+        clear_client_session(st.session_state)
+        st.success("Portfolio session data cleared. Downloaded files are not affected.")
 
 with st.expander("Data provenance"):
     st.dataframe(pd.DataFrame([data_provenance()]), hide_index=True, use_container_width=True)

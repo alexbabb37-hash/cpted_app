@@ -1,8 +1,9 @@
-"""Shared data, geospatial, and scoring logic for Locivra.
+"""Shared implementation of Locivra Methodology v1.1.
 
-Version 1.0 is a transparent prototype. Crime history determines the priority
-score. Environmental datasets are returned as context only and do not alter the
-score until their influence is separately validated.
+Historical reported-crime exposure determines the review-priority score.
+Environmental datasets are returned as context only and do not alter the score
+unless their influence is separately validated and introduced through a future
+controlled methodology version.
 """
 from __future__ import annotations
 
@@ -53,7 +54,8 @@ MIN_PRIOR_INCIDENTS_FOR_PERCENT = 10
 LOW_SAMPLE_INCIDENTS = 30
 MIN_PRIOR_WEIGHTED_EXPOSURE = 0.50
 SCORE_BANDS = ((75, "Critical review priority"), (60, "High review priority"), (40, "Moderate review priority"), (0, "Lower review priority"))
-METHODOLOGY_VERSION = "1.1 prototype"
+METHODOLOGY_VERSION = "Locivra Methodology v1.1"
+METHODOLOGY_STAGE = "Validation-stage decision support"
 DATA_SOURCE = "Toronto Police Service Public Safety Data Portal"
 DATA_COVERAGE = "2014-2026 report years"
 DATA_AS_OF = "March 31, 2026 (newest report date in the configured files)"
@@ -114,7 +116,7 @@ def priority_label(score: float) -> str:
 
 
 def comparison_interpretation(first: LocationResult, second: LocationResult) -> dict[str, str | float]:
-    """Use restrained language when two prototype scores are close."""
+    """Use restrained language when two review-priority scores are close."""
     difference = round(abs(first.overall_score - second.overall_score), 1)
     higher = first if first.overall_score >= second.overall_score else second
     if difference < 3:
@@ -337,7 +339,7 @@ def _nearest_neighbourhood(crimes: pd.DataFrame, lat: float, lon: float) -> str 
 
 def contextual_features(crimes: pd.DataFrame, lat: float, lon: float, radius_metres: int) -> dict[str, Any]:
     data = load_context_data()
-    result: dict[str, Any] = {"note": "Context only; these values do not affect the Version 1.0 score."}
+    result: dict[str, Any] = {"note": "Context only; these values do not affect Locivra Methodology v1.1."}
     stations = data["stations"]
     station_distances = haversine_metres(lat, lon, stations["latitude"].to_numpy(), stations["longitude"].to_numpy())
     if len(station_distances):
@@ -542,7 +544,14 @@ def temporal_trends(lat: float, lon: float, radius_metres: int) -> dict[str, Any
 
 def data_provenance() -> dict[str, str]:
     quality = data_quality_summary()
-    return {"Source": DATA_SOURCE, "Coverage": f"{quality['first_report_date']} to {quality['last_report_date']}", "Data as of": quality["last_report_date"], "Valid coordinate records": f"{quality['valid_records']:,}", "Methodology": METHODOLOGY_VERSION, "Geography": "Toronto only", "Data warnings": str(len(quality["warnings"]))}
+    manifest_path = ROOT / "data_manifests" / "active.json"
+    data_version = "Unversioned active files"
+    if manifest_path.exists():
+        try:
+            data_version = str(json.loads(manifest_path.read_text(encoding="utf-8")).get("data_version", data_version))
+        except (OSError, ValueError, TypeError):
+            data_version = "Unreadable active manifest"
+    return {"Source": DATA_SOURCE, "Coverage": f"{quality['first_report_date']} to {quality['last_report_date']}", "Data as of": quality["last_report_date"], "Data version": data_version, "Valid coordinate records": f"{quality['valid_records']:,}", "Methodology": METHODOLOGY_VERSION, "Geography": "Toronto only", "Data warnings": str(len(quality["warnings"]))}
 
 
 @lru_cache(maxsize=512)
@@ -557,7 +566,7 @@ def geocode_address(address: str) -> tuple[float, float, str]:
             if not location:
                 raise ValueError("Address could not be found. Add Toronto, Ontario and try again.")
             if not (TORONTO_BOUNDS[0] < location.latitude < TORONTO_BOUNDS[1] and TORONTO_BOUNDS[2] < location.longitude < TORONTO_BOUNDS[3]):
-                raise ValueError("The current prototype supports Toronto locations only.")
+                raise ValueError("Locivra Methodology v1.1 currently supports Toronto locations only.")
             return float(location.latitude), float(location.longitude), str(location.address)
         except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError):
             if attempt == 1:

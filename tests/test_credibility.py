@@ -81,6 +81,7 @@ def test_provenance_is_derived_from_configured_files_and_warns_explicitly():
     assert len(quality["files"]) == len(CRIME_WEIGHTS)
     assert quality["valid_records"] > 0
     assert provenance["Data as of"] == quality["last_report_date"]
+    assert "Data version" in provenance
     assert "Data warnings" in provenance
 
 

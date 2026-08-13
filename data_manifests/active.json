@@ -1,0 +1,244 @@
+{
+  "manifest_schema_version": "1.0",
+  "data_version": "2026-03-31-db7aefd2",
+  "generated_at_utc": "2026-08-13T14:52:10.624478+00:00",
+  "source_directory": "/Users/alexbabb/Desktop/cpted_app",
+  "status": "PASS",
+  "coverage": {
+    "first_report_date": "2014-01-01",
+    "last_report_date": "2026-03-31",
+    "valid_coordinate_records": 467867
+  },
+  "files": [
+    {
+      "category": "Assault",
+      "filename": "toronto_crime.csv",
+      "sha256": "81bbebee8a268ef1259c7c14f5cb387b1460860e6cf86042850206886640f7b4",
+      "bytes": 85976861,
+      "rows": 254378,
+      "valid_coordinate_rows": 250253,
+      "invalid_coordinate_rows": 4125,
+      "missing_date_rows": 0,
+      "exact_duplicate_rows": 0,
+      "repeated_event_id_rows": 37725,
+      "first_report_date": "2014-01-01",
+      "last_report_date": "2026-03-31",
+      "missing_columns": []
+    },
+    {
+      "category": "Break & Enter",
+      "filename": "breakenter.csv",
+      "sha256": "fea887ad8fcec001b2783f8a232d838af8eb47de15e837ea60fe58478250203c",
+      "bytes": 29272161,
+      "rows": 84689,
+      "valid_coordinate_rows": 84120,
+      "invalid_coordinate_rows": 569,
+      "missing_date_rows": 0,
+      "exact_duplicate_rows": 0,
+      "repeated_event_id_rows": 428,
+      "first_report_date": "2014-01-01",
+      "last_report_date": "2026-03-31",
+      "missing_columns": []
+    },
+    {
+      "category": "Robbery",
+      "filename": "robbery.csv",
+      "sha256": "ede0c2ae7a72499847807348e036b5c274ecf75e255b7fb30d25390c17eb39e7",
+      "bytes": 14019100,
+      "rows": 40248,
+      "valid_coordinate_rows": 39143,
+      "invalid_coordinate_rows": 1105,
+      "missing_date_rows": 0,
+      "exact_duplicate_rows": 0,
+      "repeated_event_id_rows": 8443,
+      "first_report_date": "2014-01-01",
+      "last_report_date": "2026-03-31",
+      "missing_columns": []
+    },
+    {
+      "category": "Auto Theft",
+      "filename": "autotheft.csv",
+      "sha256": "3a4fb35a5f242a230ccd8424204c3c48e092a4fe9373393fb38b862e3df88c13",
+      "bytes": 28390690,
+      "rows": 78714,
+      "valid_coordinate_rows": 77856,
+      "invalid_coordinate_rows": 858,
+      "missing_date_rows": 0,
+      "exact_duplicate_rows": 0,
+      "repeated_event_id_rows": 7472,
+      "first_report_date": "2014-01-01",
+      "last_report_date": "2026-03-31",
+      "missing_columns": []
+    },
+    {
+      "category": "Theft Over $5000",
+      "filename": "theft_over.csv",
+      "sha256": "68bcce94cf3d57b22d71b0ed025f6f84f182dee5bcb70e2facd47194cc77b0c1",
+      "bytes": 5981231,
+      "rows": 16790,
+      "valid_coordinate_rows": 16495,
+      "invalid_coordinate_rows": 295,
+      "missing_date_rows": 0,
+      "exact_duplicate_rows": 0,
+      "repeated_event_id_rows": 50,
+      "first_report_date": "2014-01-01",
+      "last_report_date": "2026-03-31",
+      "missing_columns": []
+    }
+  ],
+  "baselines": [
+    {
+      "category": "Assault",
+      "radius_metres": 250,
+      "valid_records": 250253,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 13.2593
+    },
+    {
+      "category": "Assault",
+      "radius_metres": 500,
+      "valid_records": 250253,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 53.0371
+    },
+    {
+      "category": "Assault",
+      "radius_metres": 750,
+      "valid_records": 250253,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 119.3335
+    },
+    {
+      "category": "Assault",
+      "radius_metres": 1000,
+      "valid_records": 250253,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 212.1484
+    },
+    {
+      "category": "Break & Enter",
+      "radius_metres": 250,
+      "valid_records": 84120,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 4.457
+    },
+    {
+      "category": "Break & Enter",
+      "radius_metres": 500,
+      "valid_records": 84120,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 17.8279
+    },
+    {
+      "category": "Break & Enter",
+      "radius_metres": 750,
+      "valid_records": 84120,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 40.1127
+    },
+    {
+      "category": "Break & Enter",
+      "radius_metres": 1000,
+      "valid_records": 84120,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 71.3115
+    },
+    {
+      "category": "Robbery",
+      "radius_metres": 250,
+      "valid_records": 39143,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 2.0739
+    },
+    {
+      "category": "Robbery",
+      "radius_metres": 500,
+      "valid_records": 39143,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 8.2957
+    },
+    {
+      "category": "Robbery",
+      "radius_metres": 750,
+      "valid_records": 39143,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 18.6654
+    },
+    {
+      "category": "Robbery",
+      "radius_metres": 1000,
+      "valid_records": 39143,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 33.1829
+    },
+    {
+      "category": "Auto Theft",
+      "radius_metres": 250,
+      "valid_records": 77856,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 4.1251
+    },
+    {
+      "category": "Auto Theft",
+      "radius_metres": 500,
+      "valid_records": 77856,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 16.5003
+    },
+    {
+      "category": "Auto Theft",
+      "radius_metres": 750,
+      "valid_records": 77856,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 37.1257
+    },
+    {
+      "category": "Auto Theft",
+      "radius_metres": 1000,
+      "valid_records": 77856,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 66.0013
+    },
+    {
+      "category": "Theft Over $5000",
+      "radius_metres": 250,
+      "valid_records": 16495,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 0.874
+    },
+    {
+      "category": "Theft Over $5000",
+      "radius_metres": 500,
+      "valid_records": 16495,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 3.4959
+    },
+    {
+      "category": "Theft Over $5000",
+      "radius_metres": 750,
+      "valid_records": 16495,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 7.8657
+    },
+    {
+      "category": "Theft Over $5000",
+      "radius_metres": 1000,
+      "valid_records": 16495,
+      "city_area_m2": 1235287741.04,
+      "expected_weighted_exposure": 13.9834
+    }
+  ],
+  "warnings": [
+    "toronto_crime.csv: 4,125 rows have missing or out-of-range coordinates",
+    "toronto_crime.csv: 37,725 repeated event IDs detected; these may represent multiple offences and require review",
+    "breakenter.csv: 569 rows have missing or out-of-range coordinates",
+    "breakenter.csv: 428 repeated event IDs detected; these may represent multiple offences and require review",
+    "robbery.csv: 1,105 rows have missing or out-of-range coordinates",
+    "robbery.csv: 8,443 repeated event IDs detected; these may represent multiple offences and require review",
+    "autotheft.csv: 858 rows have missing or out-of-range coordinates",
+    "autotheft.csv: 7,472 repeated event IDs detected; these may represent multiple offences and require review",
+    "theft_over.csv: 295 rows have missing or out-of-range coordinates",
+    "theft_over.csv: 50 repeated event IDs detected; these may represent multiple offences and require review"
+  ],
+  "blocking_issues": []
+}
