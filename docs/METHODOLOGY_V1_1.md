@@ -50,9 +50,12 @@ configured citywide incident density:
 
 `baseline exposure = category records × (π × radius² / 3) / configured city area`
 
-The city area is derived from the bounding extent of valid configured crime
-records. Baselines therefore recalculate when a controlled data release is
-activated. Each report identifies the data version used.
+Methodology v1.1 uses a fixed Toronto reference area of 630.2 km². Fixing this
+value prevents an outlying source coordinate from changing every location's
+baseline when a controlled data release is activated. This is a disclosed
+reference-area assumption, not a point-in-polygon boundary calculation. A future
+controlled methodology version may replace it with packaged, versioned municipal
+boundary geometry. Each report identifies the data and methodology versions used.
 
 ## 5. Category and composite scores
 
