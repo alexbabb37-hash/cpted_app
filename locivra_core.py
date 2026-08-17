@@ -60,6 +60,11 @@ DATA_SOURCE = "Toronto Police Service Public Safety Data Portal"
 DATA_COVERAGE = "2014-2026 report years"
 DATA_AS_OF = "March 31, 2026 (newest report date in the configured files)"
 TORONTO_BOUNDS = (43.0, 44.0, -80.0, -79.0)
+# Fixed reference area prevents scores from drifting when a source file gains
+# an outlying coordinate. Replace this constant with a versioned municipal
+# boundary calculation when official boundary geometry is packaged with data.
+TORONTO_REFERENCE_AREA_M2 = 630.2 * 1_000_000
+BASELINE_GEOGRAPHY = "Fixed Toronto reference area (630.2 km²)"
 EARTH_RADIUS_M = 6_371_008.8
 
 
@@ -255,6 +260,18 @@ def data_quality_summary() -> dict[str, Any]:
         })
     valid_dates = [row["Last report date"] for row in rows if row.get("Last report date") not in (None, "Not available")]
     first_dates = [row["First report date"] for row in rows if row.get("First report date") not in (None, "Not available")]
+    if valid_dates:
+        latest = pd.Timestamp(max(valid_dates))
+        for row in rows:
+            last = row.get("Last report date")
+            if last in (None, "Not available"):
+                continue
+            lag_days = int((latest - pd.Timestamp(last)).days)
+            row["Coverage lag days"] = lag_days
+            if lag_days > 31:
+                warnings.append(
+                    f"{row['File']}: latest record is {lag_days} days behind the newest configured category"
+                )
     return {
         "files": pd.DataFrame(rows),
         "warnings": warnings,
@@ -276,17 +293,36 @@ def _extract_point(value: Any) -> tuple[float, float] | None:
 
 
 @lru_cache(maxsize=1)
-def load_context_data() -> dict[str, pd.DataFrame]:
-    stations = pd.read_csv(ROOT / "ttc_stations.csv")
-    parks = pd.read_csv(ROOT / "parks.csv", low_memory=False)
-    poles = pd.read_csv(ROOT / "poles.csv", low_memory=False)
-    population = pd.read_csv(ROOT / "population_clean.csv")
+def load_context_data() -> dict[str, Any]:
+    warnings: list[str] = []
+
+    def optional_csv(filename: str, required: set[str]) -> pd.DataFrame:
+        path = ROOT / filename
+        if not path.exists():
+            warnings.append(f"Optional context file unavailable: {filename}")
+            return pd.DataFrame(columns=sorted(required))
+        try:
+            frame = pd.read_csv(path, low_memory=False)
+        except (OSError, ValueError) as exc:
+            warnings.append(f"Optional context file could not be read: {filename} ({exc})")
+            return pd.DataFrame(columns=sorted(required))
+        missing = required - set(frame.columns)
+        if missing:
+            warnings.append(f"Optional context file {filename} is missing: {', '.join(sorted(missing))}")
+            return pd.DataFrame(columns=sorted(required))
+        return frame
+
+    stations = optional_csv("ttc_stations.csv", {"latitude", "longitude", "STATION"})
+    parks = optional_csv("parks.csv", {"geometry"})
+    poles = optional_csv("poles.csv", {"geometry"})
+    population = optional_csv("population_clean.csv", {"Neighbourhood", "Population"})
     for frame in (parks, poles):
         points = frame["geometry"].map(_extract_point)
         frame["LAT"] = points.map(lambda point: point[0] if point else np.nan)
         frame["LONG"] = points.map(lambda point: point[1] if point else np.nan)
-    population["Neighbourhood"] = population["Neighbourhood"].astype(str).str.replace("`", "'", regex=False)
-    return {"stations": stations, "parks": parks.dropna(subset=["LAT", "LONG"]), "poles": poles.dropna(subset=["LAT", "LONG"]), "population": population}
+    if not population.empty:
+        population["Neighbourhood"] = population["Neighbourhood"].astype(str).str.replace("`", "'", regex=False)
+    return {"stations": stations, "parks": parks.dropna(subset=["LAT", "LONG"]), "poles": poles.dropna(subset=["LAT", "LONG"]), "population": population, "warnings": warnings}
 
 
 def haversine_metres(lat: float, lon: float, latitudes: np.ndarray, longitudes: np.ndarray) -> np.ndarray:
@@ -301,12 +337,8 @@ def haversine_metres(lat: float, lon: float, latitudes: np.ndarray, longitudes: 
 
 
 def _city_area_m2(df: pd.DataFrame) -> float:
-    lat_min, lat_max = float(df["LAT_WGS84"].min()), float(df["LAT_WGS84"].max())
-    lon_min, lon_max = float(df["LONG_WGS84"].min()), float(df["LONG_WGS84"].max())
-    mid_lat = math.radians((lat_min + lat_max) / 2)
-    height = (lat_max - lat_min) * 111_320
-    width = (lon_max - lon_min) * 111_320 * math.cos(mid_lat)
-    return max(height * width, 1.0)
+    """Return the version-controlled baseline area used by Methodology v1.1."""
+    return TORONTO_REFERENCE_AREA_M2
 
 
 def _category_score(category_df: pd.DataFrame, lat: float, lon: float, radius_metres: int, all_city_area: float) -> CategoryResult:
@@ -339,7 +371,7 @@ def _nearest_neighbourhood(crimes: pd.DataFrame, lat: float, lon: float) -> str 
 
 def contextual_features(crimes: pd.DataFrame, lat: float, lon: float, radius_metres: int) -> dict[str, Any]:
     data = load_context_data()
-    result: dict[str, Any] = {"note": "Context only; these values do not affect Locivra Methodology v1.1."}
+    result: dict[str, Any] = {"note": "Context only; these values do not affect Locivra Methodology v1.1.", "context_warnings": list(data.get("warnings", []))}
     stations = data["stations"]
     station_distances = haversine_metres(lat, lon, stations["latitude"].to_numpy(), stations["longitude"].to_numpy())
     if len(station_distances):
@@ -467,6 +499,7 @@ def result_warnings(result: LocationResult) -> list[str]:
         warnings.append("No incidents were found inside the selected radius for: " + ", ".join(zero_categories))
     if result.context and not result.context.get("nearest_ttc_station"):
         warnings.append("TTC proximity context is unavailable for this location")
+    warnings.extend(result.context.get("context_warnings", []) if result.context else [])
     return warnings
 
 
@@ -551,7 +584,7 @@ def data_provenance() -> dict[str, str]:
             data_version = str(json.loads(manifest_path.read_text(encoding="utf-8")).get("data_version", data_version))
         except (OSError, ValueError, TypeError):
             data_version = "Unreadable active manifest"
-    return {"Source": DATA_SOURCE, "Coverage": f"{quality['first_report_date']} to {quality['last_report_date']}", "Data as of": quality["last_report_date"], "Data version": data_version, "Valid coordinate records": f"{quality['valid_records']:,}", "Methodology": METHODOLOGY_VERSION, "Geography": "Toronto only", "Data warnings": str(len(quality["warnings"]))}
+    return {"Source": DATA_SOURCE, "Coverage": f"{quality['first_report_date']} to {quality['last_report_date']}", "Data as of": quality["last_report_date"], "Data version": data_version, "Valid coordinate records": f"{quality['valid_records']:,}", "Methodology": METHODOLOGY_VERSION, "Geography": "Toronto only", "Baseline geography": BASELINE_GEOGRAPHY, "Data warnings": str(len(quality["warnings"]))}
 
 
 @lru_cache(maxsize=512)
