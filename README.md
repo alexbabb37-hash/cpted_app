@@ -32,7 +32,7 @@ controls, permitted data, retention/deletion rules and hosted-deployment gates.
 - Geography: Toronto only
 - Methodology: Locivra Methodology v1.1 — validation-stage decision support
 
-The method uses geodesic distance, linear distance decay, a configured citywide reference baseline, and five published category weights. See `locivra_core.py` for the implemented formula, `docs/METHODOLOGY_V1_1.md` for the controlled statement, and the in-app methodology panels for interpretation.
+The method uses geodesic distance, linear distance decay, a fixed and disclosed Toronto reference-area baseline, and five published category weights. Source files are checked separately for category coverage gaps. See `locivra_core.py` for the implemented formula, `docs/METHODOLOGY_V1_1.md` for the controlled statement, and the in-app methodology panels for interpretation.
 
 ## Run locally
 
