@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from locivra_core import CRIME_WEIGHTS, data_provenance, data_quality_summary
+from locivra_core import CRIME_WEIGHTS, METHODOLOGY_STAGE, METHODOLOGY_VERSION, data_provenance, data_quality_summary
 
 ROOT = Path(__file__).resolve().parent
 st.set_page_config(page_title="Locivra", page_icon="📍", layout="wide")
@@ -14,7 +14,7 @@ if logo.exists():
 
 st.title("Location intelligence for smarter security decisions")
 st.write("Locivra helps multi-location organizations identify which Toronto locations warrant deeper security review using historical reported-crime exposure and location context.")
-st.info("Locivra supports prioritization. It does not predict crime, determine whether a location is safe, or replace professional site review.")
+st.info(f"{METHODOLOGY_VERSION} — {METHODOLOGY_STAGE.lower()}. Locivra does not predict crime, determine whether a location is safe, or replace professional site review.")
 
 st.subheader("Choose a workflow")
 c1, c2, c3 = st.columns(3)
@@ -33,7 +33,7 @@ st.subheader("What is included")
 st.markdown("""
 - Five published crime-category weights totaling 100%
 - Geodesic distance and distance-weighted exposure
-- A transparent citywide prototype baseline
+- A transparent configured citywide reference baseline
 - Portfolio-relative tiers and percentiles
 - Real historical incident maps and radius sensitivity
 - Optional client evidence kept separate from the public-data score

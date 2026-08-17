@@ -8,15 +8,15 @@ PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
-from locivra_core import CRIME_WEIGHTS, WEIGHT_PROFILES, data_provenance, data_quality_summary, geocode_address, nearby_incidents, radius_sensitivity, reconcile_location_result, result_warnings, score_location, score_under_weights, temporal_trends
+from locivra_core import CRIME_WEIGHTS, WEIGHT_PROFILES, METHODOLOGY_VERSION, data_provenance, data_quality_summary, geocode_address, nearby_incidents, radius_sensitivity, reconcile_location_result, result_warnings, score_location, score_under_weights, temporal_trends
 from locivra_reports import build_site_report
 
 st.title("🏪 Location Priority Assessment")
 st.caption("Decision support for prioritizing deeper security review across Toronto locations.")
 
 with st.expander("Methodology and responsible use"):
-    st.markdown("""
-Locivra Version 1.0 uses five Toronto Police Service historical incident datasets. It measures
+    st.markdown(f"""
+**{METHODOLOGY_VERSION}** uses five Toronto Police Service historical incident datasets. It measures
 distance-weighted exposure inside the selected radius, compares it with a transparent citywide
 baseline, and combines category scores using published retail-relevance weights.
 

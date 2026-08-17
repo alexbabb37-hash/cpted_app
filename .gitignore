@@ -9,6 +9,10 @@ __pycache__/
 venv/
 .env
 .streamlit/secrets.toml
+*.pem
+*.key
+client_data/
+client_reports/
 
 # Generated reports and visual QA artifacts
 output/
@@ -16,3 +20,7 @@ tmp/
 
 # Local legacy copies retained outside the release
 archive/
+
+# Staged/backup data releases are local operational records
+data_backups/
+data_staging/

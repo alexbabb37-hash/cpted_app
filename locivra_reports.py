@@ -1,12 +1,12 @@
 """Polished PDF reports shared by all Locivra scoring pages."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime, timezone
 from html import escape
 from io import BytesIO
 from pathlib import Path
 import math
-import uuid
+import hashlib
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -16,7 +16,8 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
 from reportlab.graphics.shapes import Circle, Drawing, Line, PolyLine, Rect, String
 
-from locivra_core import LocationResult, CRIME_WEIGHTS, DATA_SOURCE, DATA_COVERAGE, DATA_AS_OF, METHODOLOGY_VERSION, comparison_explanation, comparison_interpretation, data_provenance, data_quality_summary, nearby_incidents, portfolio_radius_sensitivity, radius_sensitivity, reconcile_location_result, reconcile_results, result_warnings, temporal_trends, weight_sensitivity
+from locivra_core import LocationResult, CRIME_WEIGHTS, DATA_SOURCE, METHODOLOGY_VERSION, comparison_explanation, comparison_interpretation, data_provenance, data_quality_summary, nearby_incidents, portfolio_radius_sensitivity, radius_sensitivity, reconcile_location_result, reconcile_results, result_warnings, temporal_trends, weight_sensitivity
+from locivra_pilot import PilotScorecard
 
 ROOT = Path(__file__).resolve().parent
 NAVY = colors.HexColor("#081A33")
@@ -49,10 +50,12 @@ def _page(canvas, doc):
     canvas.rect(0, height - 24, width, 24, fill=1, stroke=0)
     canvas.setFont("Helvetica-Bold", 7.5)
     canvas.setFillColor(colors.white)
-    canvas.drawString(doc.leftMargin, height - 16, "LOCIVRA  /  DECISION SUPPORT  /  CONFIDENTIAL")
+    classification = getattr(doc, "report_classification", "CLIENT CONFIDENTIAL")
+    canvas.drawString(doc.leftMargin, height - 16, f"LOCIVRA  /  DECISION SUPPORT  /  {classification}")
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 7.5)
-    canvas.drawString(doc.leftMargin, 22, f"{DATA_SOURCE} | {DATA_COVERAGE} | {DATA_AS_OF}")
+    provenance = data_provenance()
+    canvas.drawString(doc.leftMargin, 22, f"{DATA_SOURCE} | {provenance['Coverage']} | Data {provenance['Data version']}")
     canvas.drawRightString(width - doc.rightMargin, 22, f"Page {doc.page}")
     logo_path = ROOT / "locivra_logo_report.png"
     if logo_path.exists():
@@ -68,8 +71,10 @@ def _page(canvas, doc):
     canvas.restoreState()
 
 
-def _doc(buffer):
-    return SimpleDocTemplate(buffer, pagesize=letter, leftMargin=.62*inch, rightMargin=.62*inch, topMargin=.58*inch, bottomMargin=.55*inch, title="Locivra Report", author="Alex Babb / Locivra")
+def _doc(buffer, classification: str = "CLIENT CONFIDENTIAL"):
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=.62*inch, rightMargin=.62*inch, topMargin=.58*inch, bottomMargin=.55*inch, title="Locivra Report", author="Alex Babb / Locivra")
+    doc.report_classification = classification.strip().upper() or "CLIENT CONFIDENTIAL"
+    return doc
 
 
 def _logo_story(story):
@@ -81,9 +86,12 @@ def _logo_story(story):
         story.append(Paragraph("LOCIVRA", _styles()["title"]))
 
 
-def _metadata(report_type: str, count: int | None = None):
-    report_id = f"LOC-{date.today():%Y%m%d}-{uuid.uuid4().hex[:6].upper()}"
-    rows = [["REPORT", report_type], ["DATE", date.today().strftime("%B %d, %Y")], ["REPORT ID", report_id]]
+def _metadata(report_type: str, count: int | None = None, analysis_key: str = ""):
+    provenance = data_provenance()
+    seed = "|".join((report_type, str(count or ""), analysis_key, provenance["Data version"], METHODOLOGY_VERSION))
+    analysis_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12].upper()
+    generated = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rows = [["REPORT", report_type], ["GENERATED", generated], ["ANALYSIS ID", f"LOC-{analysis_id}"]]
     if count is not None:
         rows.append(["LOCATIONS", str(count)])
     table = Table(rows, colWidths=[.95*inch, 5.65*inch])
@@ -101,7 +109,7 @@ def _score_table(result: LocationResult, styles):
 
 
 def _limitations(styles):
-    text = "<b>Responsible-use boundary.</b> This report uses historical police-reported incidents and a transparent prototype methodology. It does not predict that crime will occur, certify a location as safe or unsafe, or replace internal incident data, operational knowledge, professional judgment, CPTED assessment, or a physical site visit."
+    text = f"<b>Responsible-use boundary.</b> This report applies {METHODOLOGY_VERSION} to historical police-reported incidents. It does not predict that crime will occur, certify a location as safe or unsafe, or replace internal incident data, operational knowledge, professional judgment, CPTED assessment, or a physical site visit."
     table = Table([[Paragraph(text, styles["small"])]], colWidths=[6.65*inch])
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#FFF8E8")), ("BOX",(0,0),(-1,-1),.7,colors.HexColor("#D6A83E")), ("LEFTPADDING",(0,0),(-1,-1),11), ("RIGHTPADDING",(0,0),(-1,-1),11), ("TOPPADDING",(0,0),(-1,-1),9), ("BOTTOMPADDING",(0,0),(-1,-1),9)]))
     return table
@@ -136,8 +144,11 @@ def _source_warning_note(results: list[LocationResult], styles):
         zero_categories = [item.category for item in result.categories.values() if item.raw_incidents == 0]
         if zero_categories:
             location_warnings.append(f"No local incidents for {', '.join(zero_categories)}")
-    if invalid_coordinates or missing_dates or location_warnings:
+    coverage_warnings = [warning for warning in quality["warnings"] if "latest record is" in warning]
+    if invalid_coordinates or missing_dates or location_warnings or coverage_warnings:
         text = f"{invalid_coordinates:,} source rows excluded for missing or out-of-range coordinates; {missing_dates:,} rows excluded from trend calculations for missing dates."
+        if coverage_warnings:
+            text += " Category coverage warning: " + " | ".join(coverage_warnings)
         if location_warnings:
             text += " " + " | ".join(location_warnings[:2])
     else:
@@ -168,6 +179,67 @@ def _portfolio_tier(rank: int, total: int) -> str:
     if rank <= max(2, round(total * .60)):
         return "Tier 2 - Secondary review"
     return "Tier 3 - Monitor"
+
+
+def build_pilot_scorecard_report(scorecard: PilotScorecard, review_frame, targets: dict[str, float], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
+    """Create a bounded executive pilot-results brief from the shared formulas."""
+    b, styles, story = BytesIO(), _styles(), []
+    _logo_story(story)
+    story += [
+        Paragraph("Pilot Results Scorecard", styles["title"]),
+        Paragraph("Measured usefulness, decision impact and evidence boundaries", styles["subtitle"]),
+        _metadata("Pilot validation scorecard", scorecard.completed_reviews),
+        Spacer(1, 10),
+    ]
+    recommendation_color = colors.HexColor("#EAF6F6") if scorecard.recommendation == "EXPANSION CASE" else colors.HexColor("#FFF8E8")
+    recommendation = Table([[Paragraph(f"<b>{escape(scorecard.recommendation)}</b><br/>{escape(scorecard.recommendation_reason)}", styles["body"])]], colWidths=[6.55*inch])
+    recommendation.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),recommendation_color), ("BOX",(0,0),(-1,-1),1,CYAN), ("LEFTPADDING",(0,0),(-1,-1),14), ("RIGHTPADDING",(0,0),(-1,-1),14), ("TOPPADDING",(0,0),(-1,-1),12), ("BOTTOMPADDING",(0,0),(-1,-1),9)]))
+    story += [recommendation, Paragraph("Executive measures", styles["h1"])]
+    minutes = "Not measured" if scorecard.minutes_returned is None else f"{scorecard.minutes_returned:.0f} min"
+    kpis = [[
+        Paragraph(f"<b>Reviewed</b><br/><font size='18'>{scorecard.completed_reviews}</font>", styles["body"]),
+        Paragraph(f"<b>Evidence support</b><br/><font size='18'>{scorecard.weighted_evidence_support_rate:.0%}</font>", styles["body"]),
+        Paragraph(f"<b>Priorities changed</b><br/><font size='18'>{scorecard.priorities_changed}</font>", styles["body"]),
+        Paragraph(f"<b>Overlooked surfaced</b><br/><font size='18'>{scorecard.overlooked_sites_surfaced}</font>", styles["body"]),
+        Paragraph(f"<b>Minutes returned</b><br/><font size='18'>{minutes}</font>", styles["body"]),
+    ]]
+    kpi_table = Table(kpis, colWidths=[1.31*inch]*5)
+    kpi_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),MIST), ("BOX",(0,0),(-1,-1),.6,LINE), ("INNERGRID",(0,0),(-1,-1),.4,LINE), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("LEFTPADDING",(0,0),(-1,-1),8), ("RIGHTPADDING",(0,0),(-1,-1),8), ("TOPPADDING",(0,0),(-1,-1),8), ("BOTTOMPADDING",(0,0),(-1,-1),7)]))
+    story += [kpi_table, Paragraph("Agreed targets and results", styles["h1"])]
+    rows = [["Measure", "Result", "Target", "Status"]]
+    rows += [
+        ["Completed evidence reviews", str(scorecard.completed_reviews), str(int(targets["minimum_completed_reviews"])), scorecard.completed_review_status],
+        ["Weighted evidence support", f"{scorecard.weighted_evidence_support_rate:.0%}", f"{targets['weighted_evidence_support_rate']:.0%}", scorecard.evidence_support_status],
+        ["Explanation clarity", f"{scorecard.explanation_clarity_rate:.0%}", f"{targets['explanation_clarity_rate']:.0%}", scorecard.explanation_clarity_status],
+        ["Actionability", f"{scorecard.actionability_rate:.0%}", f"{targets['actionability_rate']:.0%}", scorecard.actionability_status],
+        ["Median sensitivity rank move", "Not assessed" if scorecard.median_sensitivity_move is None else f"{scorecard.median_sensitivity_move:.1f}", f"≤ {targets['maximum_median_sensitivity_move']:.1f}", scorecard.sensitivity_status],
+    ]
+    target_table = Table(rows, colWidths=[2.75*inch,1.15*inch,1.15*inch,1.5*inch], repeatRows=1)
+    target_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTNAME",(-1,1),(-1,-1),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),8), ("ALIGN",(1,1),(-1,-1),"CENTER"), ("GRID",(0,0),(-1,-1),.4,LINE), ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,MIST]), ("TOPPADDING",(0,0),(-1,-1),6), ("BOTTOMPADDING",(0,0),(-1,-1),6)]))
+    story += [target_table, PageBreak(), Paragraph("Evidence review and boundaries", styles["title"]), Paragraph("The observations behind the executive scorecard", styles["subtitle"]), Paragraph("Evidence outcomes", styles["h1"])]
+    evidence_rows = [["Confirmed", "Partly supported", "Challenged", "Unresolved"], [scorecard.confirmed, scorecard.partly_supported, scorecard.challenged, scorecard.unresolved]]
+    evidence_table = Table(evidence_rows, colWidths=[1.64*inch]*4)
+    evidence_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTNAME",(0,1),(-1,1),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),9), ("ALIGN",(0,0),(-1,-1),"CENTER"), ("GRID",(0,0),(-1,-1),.4,LINE), ("BACKGROUND",(0,1),(-1,1),MIST), ("TOPPADDING",(0,0),(-1,-1),7), ("BOTTOMPADDING",(0,0),(-1,-1),7)]))
+    story += [evidence_table, Paragraph("Location-level evidence register", styles["h1"])]
+    detail_rows = [["Location", "Evidence outcome", "Priority changed", "Overlooked surfaced", "Clear", "Actionable"]]
+    used = review_frame[review_frame.get("Location ID", "").fillna("").astype(str).str.strip().ne("")]
+    for _, row in used.head(20).iterrows():
+        detail_rows.append([
+            Paragraph(escape(str(row.get("Location ID", ""))), styles["small"]),
+            Paragraph(escape(str(row.get("Evidence outcome", ""))), styles["small"]),
+            str(row.get("Priority changed?", "")),
+            str(row.get("Overlooked site surfaced?", "")),
+            str(row.get("Explanation clear?", "")),
+            str(row.get("Next action clear?", "")),
+        ])
+    detail_table = Table(detail_rows, colWidths=[1.05*inch,1.45*inch,1.05*inch,1.25*inch,.9*inch,.95*inch], repeatRows=1)
+    detail_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),7), ("ALIGN",(2,1),(-1,-1),"CENTER"), ("GRID",(0,0),(-1,-1),.35,LINE), ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,MIST]), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),3), ("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+    story += [detail_table, Paragraph("How to interpret this result", styles["h1"]), Paragraph("Weighted evidence support gives full credit to confirmed signals and half credit to partly supported signals. It is a pilot-usefulness measure—not predictive accuracy. Challenged and unresolved cases should be retained because they identify missing client evidence, unclear explanations, operating context or model assumptions that require refinement.", styles["body"])]
+    if scorecard.baseline_triage_minutes is not None:
+        story.append(Paragraph(f"<b>Process-time evidence:</b> Current process {scorecard.baseline_triage_minutes:.0f} minutes; Locivra-assisted process {scorecard.locivra_triage_minutes:.0f} minutes; difference {scorecard.minutes_returned:+.0f} minutes ({scorecard.time_reduction_rate:+.0%}). This is measured staff time only, not a dollar-savings or loss-reduction claim.", styles["body"]))
+    provenance = data_provenance()
+    story += [Paragraph("Evidence and use boundary", styles["h1"]), Paragraph(f"<b>Data version:</b> {escape(provenance['Data version'])}<br/><b>Methodology:</b> {escape(METHODOLOGY_VERSION)}<br/><b>Reviewed locations:</b> {scorecard.completed_reviews}<br/><b>Decision claims:</b> Priorities changed and overlooked locations surfaced are recorded observations from this pilot—not proof that incidents were prevented.", styles["body"]), _compact_limitations(styles)]
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
 
 
 def _incident_map(result: LocationResult) -> Drawing:
@@ -287,7 +359,7 @@ def _heatmap(results: list[LocationResult], styles) -> Table:
     return table
 
 
-def build_site_report(result: LocationResult) -> BytesIO:
+def build_site_report(result: LocationResult, classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     b, styles, story = BytesIO(), _styles(), []
     trends = temporal_trends(result.latitude, result.longitude, result.radius_metres)
     drivers = sorted(result.categories.values(), key=lambda item: item.contribution, reverse=True)[:3]
@@ -299,13 +371,13 @@ def build_site_report(result: LocationResult) -> BytesIO:
     story += [
         Paragraph("Location Priority Assessment", styles["title"]),
         Paragraph("What the score means, why the location ranks here, and what to validate next", styles["subtitle"]),
-        _metadata("Location assessment"),
+        _metadata("Location assessment", analysis_key=f"{result.latitude:.6f}|{result.longitude:.6f}|{result.radius_metres}|{result.overall_score:.1f}"),
         Spacer(1, 10),
     ]
     summary = Table([[Paragraph("OVERALL PRIORITY SCORE", styles["small"]), Paragraph(f"<b>{result.overall_score:.1f}/100</b>", styles["h1"]), Paragraph(escape(result.priority_label), styles["h2"])]], colWidths=[2.5*inch, 1.5*inch, 2.65*inch])
     summary.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#EAF6F6")), ("BOX",(0,0),(-1,-1),1,CYAN), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("LEFTPADDING",(0,0),(-1,-1),12), ("TOPPADDING",(0,0),(-1,-1),10), ("BOTTOMPADDING",(0,0),(-1,-1),10)]))
     quick_read = (
-        f"This location is a <b>{escape(result.priority_label.lower())}</b> within the current prototype. "
+        f"This location is a <b>{escape(result.priority_label.lower())}</b> under {METHODOLOGY_VERSION}. "
         f"Its largest weighted contributor is <b>{escape(dominant.category)}</b>, adding <b>{dominant.contribution:.1f} points</b> to the overall score. "
         f"The result is based on {total_incidents:,} category incident records inside the selected radius across the configured data period. "
         "Use the ranking to set review order, then test it against internal incidents, loss information, existing controls and observed site conditions."
@@ -322,7 +394,7 @@ def build_site_report(result: LocationResult) -> BytesIO:
             f"<b>Submitted location:</b> {escape(result.submitted_address or result.address)}<br/>"
             f"<b>Matched location:</b> {escape(result.address)}<br/>"
             f"<b>Analysis boundary:</b> {result.radius_metres} metres from the matched point<br/>"
-            f"<b>Data:</b> {DATA_SOURCE}; {DATA_COVERAGE}; data as of {DATA_AS_OF}<br/>"
+            f"<b>Data:</b> {DATA_SOURCE}; {escape(data_provenance()['Coverage'])}; version {escape(data_provenance()['Data version'])}<br/>"
             f"<b>Methodology:</b> {result.methodology_version}",
             styles["body"],
         ),
@@ -413,7 +485,7 @@ def build_site_report(result: LocationResult) -> BytesIO:
         Paragraph("Method in plain language", styles["h1"]),
         Paragraph(
             "Incidents inside the selected boundary are measured using geodesic distance. Events closer to the submitted location receive more influence through linear distance decay. "
-            "Each category is compared with the configured citywide prototype baseline and combined using the published category weights. The radius sensitivity table shows how much the result depends on the selected boundary.",
+            "Each category is compared with the configured citywide reference baseline and combined using the published category weights. The radius sensitivity table shows how much the result depends on the selected boundary.",
             styles["body"],
         ),
         Paragraph("What is not included", styles["h1"]),
@@ -423,14 +495,14 @@ def build_site_report(result: LocationResult) -> BytesIO:
             styles["body"],
         ),
         Paragraph("Data provenance and calculation audit", styles["h1"]),
-        Paragraph("<b>Source:</b> " + escape(DATA_SOURCE) + "<br/><b>Coverage:</b> " + escape(data_provenance()["Coverage"]) + "<br/><b>Data as of:</b> " + escape(data_provenance()["Data as of"]) + "<br/><b>Methodology:</b> " + escape(METHODOLOGY_VERSION), styles["body"]),
+        Paragraph("<b>Source:</b> " + escape(DATA_SOURCE) + "<br/><b>Coverage:</b> " + escape(data_provenance()["Coverage"]) + "<br/><b>Data as of:</b> " + escape(data_provenance()["Data as of"]) + "<br/><b>Data version:</b> " + escape(data_provenance()["Data version"]) + "<br/><b>Methodology:</b> " + escape(METHODOLOGY_VERSION), styles["body"]),
         _audit_note([result], styles),
         _source_warning_note([result], styles),
     ]
-    doc = _doc(b); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
 
 
-def build_comparison_report(results: list[LocationResult]) -> BytesIO:
+def build_comparison_report(results: list[LocationResult], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     if len(results) != 2:
         raise ValueError("The comparison report requires exactly two scored locations.")
     b, styles, story = BytesIO(), _styles(), []
@@ -460,7 +532,7 @@ def build_comparison_report(results: list[LocationResult]) -> BytesIO:
     story += [
         Paragraph("Location Comparison Report", styles["title"]),
         Paragraph("Which location should be reviewed first, what creates the difference, and how stable the result is", styles["subtitle"]),
-        _metadata("Location comparison", len(results)),
+        _metadata("Location comparison", len(results), "|".join(f"{r.latitude:.6f},{r.longitude:.6f},{r.radius_metres},{r.overall_score:.1f}" for r in results)),
         Spacer(1, 10),
         Paragraph("Executive recommendation", styles["h1"]),
     ]
@@ -556,7 +628,7 @@ def build_comparison_report(results: list[LocationResult]) -> BytesIO:
     contributions = Table(contribution_rows, colWidths=[1.4*inch,.52*inch,.72*inch,.72*inch,.72*inch,1.35*inch], repeatRows=1)
     contributions.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTNAME",(0,1),(0,-1),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),7.4), ("ALIGN",(1,1),(-1,-1),"CENTER"), ("GRID",(0,0),(-1,-1),.35,LINE), ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,MIST]), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),5), ("BOTTOMPADDING",(0,0),(-1,-1),5)]))
     story += [contributions, Spacer(1, 8), Paragraph("Calculation", styles["h1"]), Paragraph(
-        "The category score places local weighted exposure on the 0-100 prototype scale. Points equal category score multiplied by the published weight; the points sum to the overall score before display rounding.",
+        "The category score places local weighted exposure on the 0-100 review-priority scale. Points equal category score multiplied by the published weight; the points sum to the overall score before display rounding.",
         styles["body"],
     ), PageBreak()]
 
@@ -631,13 +703,13 @@ def build_comparison_report(results: list[LocationResult]) -> BytesIO:
         f"Begin with {escape(higher_label)} because it has the higher current review-priority score. Confirm the leading category differences, check whether existing controls explain any mismatch, and use a qualified site review before selecting physical or operational controls.",
         styles["body"],
     ), Paragraph("Data and use boundary", styles["h1"]), Paragraph(
-        f"<b>Source:</b> {DATA_SOURCE}<br/><b>Coverage:</b> {DATA_COVERAGE}<br/><b>Data as of:</b> {DATA_AS_OF}<br/><b>Methodology:</b> {METHODOLOGY_VERSION}",
+        f"<b>Source:</b> {DATA_SOURCE}<br/><b>Coverage:</b> {escape(data_provenance()['Coverage'])}<br/><b>Data as of:</b> {escape(data_provenance()['Data as of'])}<br/><b>Data version:</b> {escape(data_provenance()['Data version'])}<br/><b>Methodology:</b> {METHODOLOGY_VERSION}",
         styles["body"],
     ), _audit_note(results, styles), _source_warning_note(results, styles), _compact_limitations(styles)]
-    doc=_doc(b); doc.build(story,onFirstPage=_page,onLaterPages=_page); b.seek(0); return b
+    doc=_doc(b, classification); doc.build(story,onFirstPage=_page,onLaterPages=_page); b.seek(0); return b
 
 
-def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
+def build_portfolio_report(results: list[LocationResult], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     if not results:
         raise ValueError("At least one scored location is required.")
     b, styles, story = BytesIO(), _styles(), []
@@ -656,7 +728,8 @@ def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
 
     # Page 1 - fast executive read.
     _logo_story(story)
-    story += [Paragraph("Portfolio Security Prioritization Report", styles["title"]), Paragraph("Executive decision brief - what the ranking means and why", styles["subtitle"]), _metadata("Portfolio prioritization", len(ranked)), Spacer(1, 10), Paragraph("The 30-second summary", styles["h1"])]
+    analysis_key = "|".join(f"{r.latitude:.6f},{r.longitude:.6f},{r.radius_metres},{r.overall_score:.1f}" for r in ranked)
+    story += [Paragraph("Portfolio Security Prioritization Report", styles["title"]), Paragraph("Executive decision brief - what the ranking means and why", styles["subtitle"]), _metadata("Portfolio prioritization", len(ranked), analysis_key), Spacer(1, 10), Paragraph("The 30-second summary", styles["h1"])]
     simple_summary = (f"The portfolio is concentrated toward the upper end of Locivra's review-priority scale: <b>{bands[0] + bands[1]} of {len(ranked)} locations</b> are High or Critical priority. "
                       f"The average score is <b>{average:.1f}/100</b>, and the difference between the first and last location is <b>{spread:.1f} points</b>. "
                       f"The most common primary contributor is <b>{escape(dominant_driver)}</b>. Start by validating the top {top_count} locations against internal incidents and site knowledge before deciding on interventions.")
@@ -676,7 +749,7 @@ def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
     story += [Paragraph(why, styles["body"]), Paragraph("Recommended decision", styles["h2"]), Paragraph(f"Advance the top {top_count} locations to validation first. Compare these findings with internal loss, safety and incident records; then use a site review to determine whether physical or operational controls are warranted.", styles["body"]), _limitations(styles), PageBreak()]
 
     # Page 2 - portfolio visual pattern.
-    story += [Paragraph("Portfolio landscape", styles["title"]), Paragraph("Scores show review sequence; category patterns explain the sequence", styles["subtitle"]), Paragraph("Overall priority ranking", styles["h1"]), _ranking_chart(ranked), Spacer(1, 8), Paragraph("How to read this chart", styles["h2"]), Paragraph("Longer bars indicate stronger historical exposure relative to the prototype city baseline. The gap between adjacent bars matters: small gaps suggest a practical tier, while large gaps support a clearer review sequence.", styles["body"]), Paragraph("Category score heatmap", styles["h1"]), _heatmap(ranked, styles), Spacer(1, 7), Paragraph("Darker cells identify the categories creating each location's score. A location with several dark cells has a broad exposure pattern; one dark cell suggests a more concentrated issue to validate.", styles["small"]), PageBreak()]
+    story += [Paragraph("Portfolio landscape", styles["title"]), Paragraph("Scores show review sequence; category patterns explain the sequence", styles["subtitle"]), Paragraph("Overall priority ranking", styles["h1"]), _ranking_chart(ranked), Spacer(1, 8), Paragraph("How to read this chart", styles["h2"]), Paragraph("Longer bars indicate stronger historical exposure relative to the configured citywide reference baseline. The gap between adjacent bars matters: small gaps suggest a practical tier, while large gaps support a clearer review sequence.", styles["body"]), Paragraph("Category score heatmap", styles["h1"]), _heatmap(ranked, styles), Spacer(1, 7), Paragraph("Darker cells identify the categories creating each location's score. A location with several dark cells has a broad exposure pattern; one dark cell suggests a more concentrated issue to validate.", styles["small"]), PageBreak()]
 
     story += [Paragraph("Historical direction", styles["title"]), Paragraph("Equal rolling windows reveal whether the recent signal is rising, falling or mixed", styles["subtitle"])]
     trend_rows = [["Rank", "Location", "Latest 6 months", "Latest 12 months", "12-month incidents"]]
@@ -747,9 +820,9 @@ def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
 
     # Final methodology and action page.
     provenance = data_provenance()
-    story += [PageBreak(), Paragraph("Methodology and action plan", styles["title"]), Paragraph("Transparent enough to challenge, bounded enough to use responsibly", styles["subtitle"]), Paragraph("Data provenance", styles["h1"]), Paragraph(f"<b>Source:</b> {escape(provenance['Source'])}<br/><b>Coverage:</b> {escape(provenance['Coverage'])}<br/><b>Data as of:</b> {escape(provenance['Data as of'])}<br/><b>Valid coordinate records:</b> {escape(provenance['Valid coordinate records'])}<br/><b>Geography:</b> Toronto only<br/><b>Methodology version:</b> {METHODOLOGY_VERSION}", styles["body"]), _source_warning_note(ranked, styles), Paragraph("How the score works", styles["h1"]), Paragraph("1. Incidents inside the selected radius are measured using geodesic distance. 2. Incidents closer to the location receive more influence through linear distance decay. 3. Each category is compared with a citywide prototype baseline; baseline exposure maps to the middle of the scale. 4. Category scores are combined using published weights: Theft Over $5,000 30%, Break & Enter 25%, Robbery 25%, Assault 15%, and Auto Theft 5%. Portfolio tiers are relative to the submitted locations and do not claim universal risk boundaries.", styles["body"]), Paragraph("What the score does not explain", styles["h1"]), Paragraph("The model does not include unreported events, internal company incidents, store hours, sales volume, foot traffic, existing controls, site layout, current operating conditions, or causal claims. Environmental datasets are contextual until their influence is separately validated.", styles["body"]), Paragraph("Suggested pilot workflow", styles["h1"])]
+    story += [PageBreak(), Paragraph("Methodology and action plan", styles["title"]), Paragraph("Transparent enough to challenge, bounded enough to use responsibly", styles["subtitle"]), Paragraph("Data provenance", styles["h1"]), Paragraph(f"<b>Source:</b> {escape(provenance['Source'])}<br/><b>Coverage:</b> {escape(provenance['Coverage'])}<br/><b>Data as of:</b> {escape(provenance['Data as of'])}<br/><b>Data version:</b> {escape(provenance['Data version'])}<br/><b>Valid coordinate records:</b> {escape(provenance['Valid coordinate records'])}<br/><b>Geography:</b> Toronto only<br/><b>Methodology version:</b> {METHODOLOGY_VERSION}", styles["body"]), _source_warning_note(ranked, styles), Paragraph("How the score works", styles["h1"]), Paragraph("1. Incidents inside the selected radius are measured using geodesic distance. 2. Incidents closer to the location receive more influence through linear distance decay. 3. Each category is compared with a configured citywide reference baseline; baseline exposure maps to the middle of the scale. 4. Category scores are combined using published weights: Theft Over $5,000 30%, Break & Enter 25%, Robbery 25%, Assault 15%, and Auto Theft 5%. Portfolio tiers are relative to the submitted locations and do not claim universal risk boundaries.", styles["body"]), Paragraph("What the score does not explain", styles["h1"]), Paragraph("The model does not include unreported events, internal company incidents, store hours, sales volume, foot traffic, existing controls, site layout, current operating conditions, or causal claims. Environmental datasets are contextual until their influence is separately validated.", styles["body"]), Paragraph("Suggested pilot workflow", styles["h1"])]
     workflow = [["Step", "Action", "Output"], ["1", "Review this portfolio brief with Security/Loss Prevention leadership.", "Agreed priority tier"], ["2", "Compare top-location drivers with internal incidents and local knowledge.", "Confirmed or challenged signals"], ["3", "Select 5-20 locations for bounded professional review.", "Pilot cohort"], ["4", "Conduct site review before selecting controls.", "Evidence-based recommendations"], ["5", "Record disagreements and outcomes to refine the method.", "Validation log and roadmap"]]
     workflow_table = Table(workflow, colWidths=[.45*inch,4.15*inch,2.05*inch])
     workflow_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),8), ("GRID",(0,0),(-1,-1),.35,LINE), ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,MIST]), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),7), ("BOTTOMPADDING",(0,0),(-1,-1),7)]))
     story += [workflow_table, Spacer(1, 14), _limitations(styles)]
-    doc = _doc(b); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b

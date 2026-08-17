@@ -13,6 +13,8 @@ from locivra_core import (
     score_location,
     temporal_trends,
     weight_sensitivity,
+    _city_area_m2,
+    TORONTO_REFERENCE_AREA_M2,
 )
 from locivra_reports import build_comparison_report, build_portfolio_report, build_site_report
 
@@ -81,7 +83,17 @@ def test_provenance_is_derived_from_configured_files_and_warns_explicitly():
     assert len(quality["files"]) == len(CRIME_WEIGHTS)
     assert quality["valid_records"] > 0
     assert provenance["Data as of"] == quality["last_report_date"]
+    assert "Data version" in provenance
     assert "Data warnings" in provenance
+    assert "Baseline geography" in provenance
+    assert "Coverage lag days" in quality["files"].columns
+
+
+def test_baseline_area_is_fixed_and_cannot_drift_with_source_outliers():
+    ordinary = pd.DataFrame({"LAT_WGS84": [43.6, 43.7], "LONG_WGS84": [-79.5, -79.3]})
+    with_outlier = pd.DataFrame({"LAT_WGS84": [43.0, 44.0], "LONG_WGS84": [-80.0, -79.0]})
+    assert _city_area_m2(ordinary) == TORONTO_REFERENCE_AREA_M2
+    assert _city_area_m2(with_outlier) == TORONTO_REFERENCE_AREA_M2
 
 
 def test_all_pdf_generators_complete_with_audited_results():
