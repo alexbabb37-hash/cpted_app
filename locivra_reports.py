@@ -1,12 +1,12 @@
 """Polished PDF reports shared by all Locivra scoring pages."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime, timezone
 from html import escape
 from io import BytesIO
 from pathlib import Path
 import math
-import uuid
+import hashlib
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -50,7 +50,8 @@ def _page(canvas, doc):
     canvas.rect(0, height - 24, width, 24, fill=1, stroke=0)
     canvas.setFont("Helvetica-Bold", 7.5)
     canvas.setFillColor(colors.white)
-    canvas.drawString(doc.leftMargin, height - 16, "LOCIVRA  /  DECISION SUPPORT  /  CONFIDENTIAL")
+    classification = getattr(doc, "report_classification", "CLIENT CONFIDENTIAL")
+    canvas.drawString(doc.leftMargin, height - 16, f"LOCIVRA  /  DECISION SUPPORT  /  {classification}")
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 7.5)
     provenance = data_provenance()
@@ -70,8 +71,10 @@ def _page(canvas, doc):
     canvas.restoreState()
 
 
-def _doc(buffer):
-    return SimpleDocTemplate(buffer, pagesize=letter, leftMargin=.62*inch, rightMargin=.62*inch, topMargin=.58*inch, bottomMargin=.55*inch, title="Locivra Report", author="Alex Babb / Locivra")
+def _doc(buffer, classification: str = "CLIENT CONFIDENTIAL"):
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=.62*inch, rightMargin=.62*inch, topMargin=.58*inch, bottomMargin=.55*inch, title="Locivra Report", author="Alex Babb / Locivra")
+    doc.report_classification = classification.strip().upper() or "CLIENT CONFIDENTIAL"
+    return doc
 
 
 def _logo_story(story):
@@ -83,9 +86,12 @@ def _logo_story(story):
         story.append(Paragraph("LOCIVRA", _styles()["title"]))
 
 
-def _metadata(report_type: str, count: int | None = None):
-    report_id = f"LOC-{date.today():%Y%m%d}-{uuid.uuid4().hex[:6].upper()}"
-    rows = [["REPORT", report_type], ["DATE", date.today().strftime("%B %d, %Y")], ["REPORT ID", report_id]]
+def _metadata(report_type: str, count: int | None = None, analysis_key: str = ""):
+    provenance = data_provenance()
+    seed = "|".join((report_type, str(count or ""), analysis_key, provenance["Data version"], METHODOLOGY_VERSION))
+    analysis_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12].upper()
+    generated = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rows = [["REPORT", report_type], ["GENERATED", generated], ["ANALYSIS ID", f"LOC-{analysis_id}"]]
     if count is not None:
         rows.append(["LOCATIONS", str(count)])
     table = Table(rows, colWidths=[.95*inch, 5.65*inch])
@@ -138,8 +144,11 @@ def _source_warning_note(results: list[LocationResult], styles):
         zero_categories = [item.category for item in result.categories.values() if item.raw_incidents == 0]
         if zero_categories:
             location_warnings.append(f"No local incidents for {', '.join(zero_categories)}")
-    if invalid_coordinates or missing_dates or location_warnings:
+    coverage_warnings = [warning for warning in quality["warnings"] if "latest record is" in warning]
+    if invalid_coordinates or missing_dates or location_warnings or coverage_warnings:
         text = f"{invalid_coordinates:,} source rows excluded for missing or out-of-range coordinates; {missing_dates:,} rows excluded from trend calculations for missing dates."
+        if coverage_warnings:
+            text += " Category coverage warning: " + " | ".join(coverage_warnings)
         if location_warnings:
             text += " " + " | ".join(location_warnings[:2])
     else:
@@ -172,7 +181,7 @@ def _portfolio_tier(rank: int, total: int) -> str:
     return "Tier 3 - Monitor"
 
 
-def build_pilot_scorecard_report(scorecard: PilotScorecard, review_frame, targets: dict[str, float]) -> BytesIO:
+def build_pilot_scorecard_report(scorecard: PilotScorecard, review_frame, targets: dict[str, float], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     """Create a bounded executive pilot-results brief from the shared formulas."""
     b, styles, story = BytesIO(), _styles(), []
     _logo_story(story)
@@ -230,7 +239,7 @@ def build_pilot_scorecard_report(scorecard: PilotScorecard, review_frame, target
         story.append(Paragraph(f"<b>Process-time evidence:</b> Current process {scorecard.baseline_triage_minutes:.0f} minutes; Locivra-assisted process {scorecard.locivra_triage_minutes:.0f} minutes; difference {scorecard.minutes_returned:+.0f} minutes ({scorecard.time_reduction_rate:+.0%}). This is measured staff time only, not a dollar-savings or loss-reduction claim.", styles["body"]))
     provenance = data_provenance()
     story += [Paragraph("Evidence and use boundary", styles["h1"]), Paragraph(f"<b>Data version:</b> {escape(provenance['Data version'])}<br/><b>Methodology:</b> {escape(METHODOLOGY_VERSION)}<br/><b>Reviewed locations:</b> {scorecard.completed_reviews}<br/><b>Decision claims:</b> Priorities changed and overlooked locations surfaced are recorded observations from this pilot—not proof that incidents were prevented.", styles["body"]), _compact_limitations(styles)]
-    doc = _doc(b); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
 
 
 def _incident_map(result: LocationResult) -> Drawing:
@@ -350,7 +359,7 @@ def _heatmap(results: list[LocationResult], styles) -> Table:
     return table
 
 
-def build_site_report(result: LocationResult) -> BytesIO:
+def build_site_report(result: LocationResult, classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     b, styles, story = BytesIO(), _styles(), []
     trends = temporal_trends(result.latitude, result.longitude, result.radius_metres)
     drivers = sorted(result.categories.values(), key=lambda item: item.contribution, reverse=True)[:3]
@@ -362,7 +371,7 @@ def build_site_report(result: LocationResult) -> BytesIO:
     story += [
         Paragraph("Location Priority Assessment", styles["title"]),
         Paragraph("What the score means, why the location ranks here, and what to validate next", styles["subtitle"]),
-        _metadata("Location assessment"),
+        _metadata("Location assessment", analysis_key=f"{result.latitude:.6f}|{result.longitude:.6f}|{result.radius_metres}|{result.overall_score:.1f}"),
         Spacer(1, 10),
     ]
     summary = Table([[Paragraph("OVERALL PRIORITY SCORE", styles["small"]), Paragraph(f"<b>{result.overall_score:.1f}/100</b>", styles["h1"]), Paragraph(escape(result.priority_label), styles["h2"])]], colWidths=[2.5*inch, 1.5*inch, 2.65*inch])
@@ -490,10 +499,10 @@ def build_site_report(result: LocationResult) -> BytesIO:
         _audit_note([result], styles),
         _source_warning_note([result], styles),
     ]
-    doc = _doc(b); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
 
 
-def build_comparison_report(results: list[LocationResult]) -> BytesIO:
+def build_comparison_report(results: list[LocationResult], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     if len(results) != 2:
         raise ValueError("The comparison report requires exactly two scored locations.")
     b, styles, story = BytesIO(), _styles(), []
@@ -523,7 +532,7 @@ def build_comparison_report(results: list[LocationResult]) -> BytesIO:
     story += [
         Paragraph("Location Comparison Report", styles["title"]),
         Paragraph("Which location should be reviewed first, what creates the difference, and how stable the result is", styles["subtitle"]),
-        _metadata("Location comparison", len(results)),
+        _metadata("Location comparison", len(results), "|".join(f"{r.latitude:.6f},{r.longitude:.6f},{r.radius_metres},{r.overall_score:.1f}" for r in results)),
         Spacer(1, 10),
         Paragraph("Executive recommendation", styles["h1"]),
     ]
@@ -697,10 +706,10 @@ def build_comparison_report(results: list[LocationResult]) -> BytesIO:
         f"<b>Source:</b> {DATA_SOURCE}<br/><b>Coverage:</b> {escape(data_provenance()['Coverage'])}<br/><b>Data as of:</b> {escape(data_provenance()['Data as of'])}<br/><b>Data version:</b> {escape(data_provenance()['Data version'])}<br/><b>Methodology:</b> {METHODOLOGY_VERSION}",
         styles["body"],
     ), _audit_note(results, styles), _source_warning_note(results, styles), _compact_limitations(styles)]
-    doc=_doc(b); doc.build(story,onFirstPage=_page,onLaterPages=_page); b.seek(0); return b
+    doc=_doc(b, classification); doc.build(story,onFirstPage=_page,onLaterPages=_page); b.seek(0); return b
 
 
-def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
+def build_portfolio_report(results: list[LocationResult], classification: str = "CLIENT CONFIDENTIAL") -> BytesIO:
     if not results:
         raise ValueError("At least one scored location is required.")
     b, styles, story = BytesIO(), _styles(), []
@@ -719,7 +728,8 @@ def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
 
     # Page 1 - fast executive read.
     _logo_story(story)
-    story += [Paragraph("Portfolio Security Prioritization Report", styles["title"]), Paragraph("Executive decision brief - what the ranking means and why", styles["subtitle"]), _metadata("Portfolio prioritization", len(ranked)), Spacer(1, 10), Paragraph("The 30-second summary", styles["h1"])]
+    analysis_key = "|".join(f"{r.latitude:.6f},{r.longitude:.6f},{r.radius_metres},{r.overall_score:.1f}" for r in ranked)
+    story += [Paragraph("Portfolio Security Prioritization Report", styles["title"]), Paragraph("Executive decision brief - what the ranking means and why", styles["subtitle"]), _metadata("Portfolio prioritization", len(ranked), analysis_key), Spacer(1, 10), Paragraph("The 30-second summary", styles["h1"])]
     simple_summary = (f"The portfolio is concentrated toward the upper end of Locivra's review-priority scale: <b>{bands[0] + bands[1]} of {len(ranked)} locations</b> are High or Critical priority. "
                       f"The average score is <b>{average:.1f}/100</b>, and the difference between the first and last location is <b>{spread:.1f} points</b>. "
                       f"The most common primary contributor is <b>{escape(dominant_driver)}</b>. Start by validating the top {top_count} locations against internal incidents and site knowledge before deciding on interventions.")
@@ -815,4 +825,4 @@ def build_portfolio_report(results: list[LocationResult]) -> BytesIO:
     workflow_table = Table(workflow, colWidths=[.45*inch,4.15*inch,2.05*inch])
     workflow_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),NAVY), ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,-1),8), ("GRID",(0,0),(-1,-1),.35,LINE), ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,MIST]), ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),7), ("BOTTOMPADDING",(0,0),(-1,-1),7)]))
     story += [workflow_table, Spacer(1, 14), _limitations(styles)]
-    doc = _doc(b); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
+    doc = _doc(b, classification); doc.build(story, onFirstPage=_page, onLaterPages=_page); b.seek(0); return b
